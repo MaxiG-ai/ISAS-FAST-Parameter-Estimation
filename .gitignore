@@ -1,2 +1,10 @@
 .DS_Store
 
+# ignore devcontainer settings
+.devcontainer
+
+# ignoring venv
+.venv
+
+# ignoring data
+data/
