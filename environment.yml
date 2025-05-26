@@ -14,6 +14,8 @@ dependencies:
   - pip:
     - setuptools==68.2
     - wheel==0.41
-#    - gmsh==4.11.1
+    - gmsh==4.11.1
     - fenics-basix==0.6.0
     - pyfiglet==1.0
+  
+# numpy scipy matplotlib meshio petsc4py pip fenics setuptools wheel gmsh fenics-basix pyfiglet
