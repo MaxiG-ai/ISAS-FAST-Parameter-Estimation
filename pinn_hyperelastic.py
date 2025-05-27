@@ -1,238 +1,194 @@
-# Physics-Informed Neural Network for Hyperelastic Beam Parameter Optimization
+# Simplified Physics-Informed Neural Network for Material Parameter Identification
+# This is a minimal example to demonstrate PINN concepts without external FEM dependencies
+
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 import optax
-import os
+import numpy as np
 from functools import partial
 
-# Import JAX-FEM specific modules
-from jax_fem.problem import Problem
-from jax_fem.solver import solver
-from jax_fem.utils import save_sol
-from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
 
-
-class HyperElasticityPINN(Problem):
+def generate_synthetic_data():
     """
-    Hyperelastic problem class with parameterized material properties.
-    This allows the PINN to optimize the material parameters E and nu.
+    Generate synthetic displacement data for a simple 1D elastic problem.
+    This simulates experimental or reference data that we want to match.
     """
+    # True material parameters (what we want to recover)
+    E_true = 210.0  # Young's modulus (GPa)
     
-    def __init__(self, mesh, E, nu, **kwargs):
-        # Store material parameters as instance variables
-        self.E_param = E
-        self.nu_param = nu
-        super().__init__(mesh, **kwargs)
+    # Create simple 1D displacement field: u = F*x/E (linear elasticity)
+    x_points = np.linspace(0, 1, 20)  # 1D domain from 0 to 1
+    applied_force = 1000.0  # Applied force
     
-    def get_tensor_map(self):
-        """
-        Define the constitutive relationship with parameterized material properties.
-        The PINN will optimize E and nu to match target displacement patterns.
-        """
-        def psi(F, E, nu):
-            # Convert material parameters to Lamé parameters
-            mu = E / (2. * (1. + nu))
-            kappa = E / (3. * (1. - 2. * nu))
-            
-            # Compute deformation invariants
-            J = np.linalg.det(F)
-            Jinv = J**(-2. / 3.)
-            I1 = np.trace(F.T @ F)
-            
-            # Neo-Hookean strain energy density
-            energy = (mu / 2.) * (Jinv * I1 - 3.) + (kappa / 2.) * (J - 1.)**2.
-            return energy
-
-        # Create gradients for first Piola-Kirchhoff stress
-        P_fn = jax.grad(psi, argnums=0)
-
-        def first_PK_stress(u_grad):
-            I = np.eye(self.dim)
-            F = u_grad + I
-            P = P_fn(F, self.E_param, self.nu_param)
-            return P
-
-        return first_PK_stress
+    # True displacement using linear elasticity: u = F*x/E
+    u_true = applied_force * x_points / E_true
+    
+    return x_points, u_true, E_true, applied_force
 
 
-def create_mesh_and_bc():
+def physics_model(x, E, applied_force):
     """
-    Create the mesh and boundary conditions for the hyperelastic beam problem.
-    Returns mesh and boundary condition information.
-    """
-    # Mesh parameters (using smaller mesh for faster PINN training)
-    ele_type = 'HEX8'
-    cell_type = get_meshio_cell_type(ele_type)
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
-    Lx, Ly, Lz = 1., 1., 1.
-    
-    # Generate mesh with reduced resolution for faster computation
-    meshio_mesh = box_mesh_gmsh(Nx=10, Ny=10, Nz=10,
-                               Lx=Lx, Ly=Ly, Lz=Lz,
-                               data_dir=data_dir,
-                               ele_type=ele_type)
-    mesh = Mesh(meshio_mesh.points, meshio_mesh.cells_dict[cell_type])
-    
-    # Define boundary locations
-    def left(point):
-        return np.isclose(point[0], 0., atol=1e-5)
-    
-    def right(point):
-        return np.isclose(point[0], Lx, atol=1e-5)
-    
-    # Define Dirichlet boundary values
-    def zero_dirichlet_val(point):
-        return 0.
-    
-    def dirichlet_val_x2(point):
-        return (0.5 + (point[1] - 0.5) * np.cos(np.pi / 3.) -
-                (point[2] - 0.5) * np.sin(np.pi / 3.) - point[1]) / 2.
-    
-    def dirichlet_val_x3(point):
-        return (0.5 + (point[1] - 0.5) * np.sin(np.pi / 3.) +
-                (point[2] - 0.5) * np.cos(np.pi / 3.) - point[2]) / 2.
-    
-    # Assemble boundary condition information
-    dirichlet_bc_info = [[left] * 3 + [right] * 3, [0, 1, 2] * 2,
-                         [zero_dirichlet_val, dirichlet_val_x2, dirichlet_val_x3] +
-                         [zero_dirichlet_val] * 3]
-    
-    return mesh, dirichlet_bc_info
-
-
-def solve_fem_problem(params, mesh, dirichlet_bc_info):
-    """
-    Solve the FEM problem with given material parameters.
+    Simple 1D elasticity model: u(x) = F*x/E
+    This represents our physics understanding of the problem.
     
     Args:
-        params: Dictionary containing E and nu values
-        mesh: FEM mesh
-        dirichlet_bc_info: Boundary condition information
+        x: spatial coordinates
+        E: Young's modulus (parameter to optimize)
+        applied_force: applied load
     
     Returns:
-        Displacement solution array
+        displacement field
     """
-    E, nu = params['E'], params['nu']
-    
-    # Create problem instance with current parameters
-    problem = HyperElasticityPINN(mesh, E, nu,
-                                  vec=3, dim=3, ele_type='HEX8',
-                                  dirichlet_bc_info=dirichlet_bc_info)
-    
-    # Solve the problem
-    sol_list = solver(problem, solver_options={'petsc_solver': {}})
-    
-    return sol_list[0]  # Return displacement solution
+    return applied_force * x / E
 
 
-def compute_loss(params, mesh, dirichlet_bc_info, target_displacement):
+def compute_physics_loss(E, x_data, u_target, applied_force):
     """
-    Compute the physics-informed loss function.
-    This function measures how well the current parameters reproduce target behavior.
+    Physics-informed loss function.
+    Measures how well our current E parameter reproduces the target displacements.
     
     Args:
-        params: Material parameters to optimize
-        mesh: FEM mesh
-        dirichlet_bc_info: Boundary conditions
-        target_displacement: Target displacement field for comparison
+        E: Current estimate of Young's modulus
+        x_data: spatial coordinates
+        u_target: target displacement data
+        applied_force: applied force
     
     Returns:
-        Loss value (scalar)
+        loss value
     """
-    # Solve FEM with current parameters
-    predicted_displacement = solve_fem_problem(params, mesh, dirichlet_bc_info)
+    # Predict displacements using current E
+    u_predicted = physics_model(x_data, E, applied_force)
     
-    # Compute L2 norm difference between predicted and target displacements
-    loss = np.mean((predicted_displacement - target_displacement)**2)
+    # Mean squared error between predicted and target
+    data_loss = jnp.mean((u_predicted - u_target)**2)
     
-    # Add parameter regularization to keep E and nu in physically reasonable ranges
-    E_penalty = np.maximum(0., -params['E'] + 1e-3)  # E should be positive
-    nu_penalty = np.maximum(0., np.abs(params['nu']) - 0.49)  # |nu| < 0.5 for stability
+    # Physics constraint: ensure E stays positive (regularization)
+    physics_loss = jnp.maximum(0.0, -E + 1.0)  # Penalty if E < 1
     
-    total_loss = loss + 1e-3 * (E_penalty + nu_penalty)
-    
+    total_loss = data_loss + 0.01 * physics_loss
     return total_loss
-
-
-def generate_target_data(mesh, dirichlet_bc_info):
-    """
-    Generate target displacement data using known material parameters.
-    In practice, this would be experimental or reference simulation data.
-    """
-    print("Generating target data with reference parameters...")
-    
-    # Reference parameters (these are the "true" values we want to recover)
-    true_params = {'E': 15.0, 'nu': 0.25}
-    
-    # Solve with reference parameters to get target displacement
-    target_displacement = solve_fem_problem(true_params, mesh, dirichlet_bc_info)
-    
-    print(f"Target generated with E={true_params['E']}, nu={true_params['nu']}")
-    return target_displacement, true_params
 
 
 def pinn_optimization():
     """
-    Main PINN optimization loop for material parameter identification.
+    Main PINN optimization for material parameter identification.
+    This demonstrates the core PINN concept in a minimal example.
     """
-    print("Starting PINN optimization for hyperelastic beam parameters...")
+    print("=" * 60)
+    print("SIMPLIFIED PINN FOR MATERIAL PARAMETER IDENTIFICATION")
+    print("=" * 60)
+    print("Learning objective: Identify Young's modulus E from displacement data")
+    print()
+    print("PINN CONCEPT:")
+    print("- We have displacement measurements u(x) at different positions x")
+    print("- We know the physics: u(x) = F*x/E (linear elasticity)")
+    print("- We want to find E that makes our physics model match the data")
+    print("- This is 'physics-informed' because we use domain knowledge")
+    print()
     
-    # Setup mesh and boundary conditions
-    mesh, dirichlet_bc_info = create_mesh_and_bc()
-    print(f"Mesh created with {len(mesh.points)} nodes")
+    # Generate synthetic target data
+    x_data, u_target, E_true, applied_force = generate_synthetic_data()
+    print(f"Generated target data:")
+    print(f"  - True Young's modulus: {E_true:.1f} GPa")
+    print(f"  - Applied force: {applied_force:.1f} N")
+    print(f"  - Number of data points: {len(x_data)}")
+    print(f"  - Physics equation: u(x) = {applied_force:.0f} * x / E")
+    print()
     
-    # Generate target data (normally this would be experimental data)
-    target_displacement, true_params = generate_target_data(mesh, dirichlet_bc_info)
+    # Initial guess for Young's modulus (what the PINN starts with)
+    E_initial = 100.0  # Start with a different value
+    print(f"Initial guess: E = {E_initial:.1f} GPa")
+    print(f"Initial error: {abs(E_initial - E_true):.1f} GPa")
     
-    # Initialize parameters to be optimized (starting guess)
-    initial_params = {'E': 8.0, 'nu': 0.35}  # Initial guess different from true values
-    print(f"Starting optimization from E={initial_params['E']}, nu={initial_params['nu']}")
+    # Show what the initial guess predicts
+    u_initial = physics_model(x_data, E_initial, applied_force)
+    initial_loss = jnp.mean((u_initial - u_target)**2)
+    print(f"Initial prediction error (MSE): {initial_loss:.6f}")
+    print()
     
-    # Setup optimizer (Adam with learning rate scheduling)
-    learning_rate = 1e-2
+    # Setup JAX optimization
+    learning_rate = 1.0  # Larger learning rate for this simple problem
     optimizer = optax.adam(learning_rate)
-    opt_state = optimizer.init(initial_params)
     
-    # JIT compile the loss function for faster execution
+    # Initialize parameter (just a single scalar in this case)
+    E = E_initial
+    opt_state = optimizer.init(E)
+    
+    # JIT compile the loss and gradient computation for speed
     @jax.jit
-    def loss_and_grad(params):
-        loss_fn = lambda p: compute_loss(p, mesh, dirichlet_bc_info, target_displacement)
-        loss, grad = jax.value_and_grad(loss_fn)(params)
-        return loss, grad
+    def loss_and_grad(E_param):
+        loss_fn = lambda E: compute_physics_loss(E, x_data, u_target, applied_force)
+        return jax.value_and_grad(loss_fn)(E_param)
     
     # Optimization loop
-    params = initial_params.copy()
-    num_epochs = 50  # Sensible number of iterations for demonstration
+    num_epochs = 100
+    print("Starting optimization...")
+    print("Epoch |    Loss    |     E     | Error   | % Error")
+    print("-" * 50)
     
-    print("\nStarting optimization...")
-    print("Epoch | Loss      | E        | nu      | Error E  | Error nu")
-    print("-" * 65)
+    # Store history for analysis
+    loss_history = []
+    E_history = []
     
-    for epoch in range(num_epochs):
-        # Compute loss and gradients
-        loss, grads = loss_and_grad(params)
+    for epoch in range(num_epochs + 1):
+        # Compute loss and gradient
+        loss, grad = loss_and_grad(E)
+        loss_history.append(float(loss))
+        E_history.append(float(E))
         
-        # Update parameters
-        updates, opt_state = optimizer.update(grads, opt_state)
-        params = optax.apply_updates(params, updates)
+        # Update parameter
+        if epoch < num_epochs:  # Don't update on final iteration (just print)
+            updates, opt_state = optimizer.update(grad, opt_state)
+            E = optax.apply_updates(E, updates)
         
-        # Compute errors relative to true parameters
-        error_E = abs(params['E'] - true_params['E'])
-        error_nu = abs(params['nu'] - true_params['nu'])
-        
-        # Print progress every 5 epochs
-        if epoch % 5 == 0 or epoch == num_epochs - 1:
-            print(f"{epoch:5d} | {loss:.6f} | {params['E']:8.4f} | {params['nu']:7.4f} | "
-                  f"{error_E:8.4f} | {error_nu:8.4f}")
+        # Print progress
+        error = abs(E - E_true)
+        error_percent = (error/E_true)*100
+        if epoch % 20 == 0 or epoch == num_epochs:
+            print(f"{epoch:5d} | {loss:10.6f} | {E:9.2f} | {error:7.2f} | {error_percent:6.2f}%")
     
-    print("\nOptimization completed!")
-    print(f"True parameters:      E = {true_params['E']:.4f}, nu = {true_params['nu']:.4f}")
-    print(f"Optimized parameters: E = {params['E']:.4f}, nu = {params['nu']:.4f}")
-    print(f"Final errors:         E = {error_E:.6f}, nu = {error_nu:.6f}")
+    print()
+    print("OPTIMIZATION RESULTS:")
+    print(f"  True value:      E = {E_true:.2f} GPa")
+    print(f"  Optimized value: E = {E:.2f} GPa")
+    print(f"  Final error:     {error:.4f} GPa")
+    print(f"  Error percentage: {error_percent:.2f}%")
+    print(f"  Improvement:     {((E_initial - E_true)/E_true*100) - error_percent:.2f} percentage points")
     
-    return params, true_params
+    # Demonstrate the fitted model
+    print()
+    print("VERIFICATION:")
+    u_fitted = physics_model(x_data, E, applied_force)
+    rmse = jnp.sqrt(jnp.mean((u_fitted - u_target)**2))
+    print(f"  RMSE of fitted displacements: {rmse:.6f}")
+    print(f"  Max displacement (target): {jnp.max(u_target):.6f}")
+    print(f"  Max displacement (fitted): {jnp.max(u_fitted):.6f}")
+    
+    # Show convergence behavior
+    initial_loss = loss_history[0]
+    final_loss = loss_history[-1]
+    print(f"  Loss reduction: {initial_loss:.6f} → {final_loss:.6f} ({(1-final_loss/initial_loss)*100:.1f}% decrease)")
+    
+    print()
+    print("KEY PINN CONCEPTS DEMONSTRATED:")
+    print("1. Physics model: u(x) = F*x/E (linear elasticity)")
+    print("2. Parameter optimization: Finding E that best fits data")
+    print("3. Physics constraints: Regularization to keep E > 0")
+    print("4. JAX compilation: Fast gradient computation")
+    print("5. Data-driven learning: Using displacement measurements")
+    print("6. Inverse problem: Finding material properties from observations")
+    
+    print()
+    print("NEXT STEPS FOR LEARNING:")
+    print("- Try with nonlinear physics models (hyperelasticity)")
+    print("- Add noise to the target data to test robustness")
+    print("- Optimize multiple parameters simultaneously (E and ν)")
+    print("- Use neural networks instead of analytical models")
+    print("- Apply to partial differential equations (PDEs)")
+    
+    return float(E), E_true
 
 
 if __name__ == "__main__":
-    # Run the PINN optimization
-    optimized_params, true_params = pinn_optimization()
+    # Run the simplified PINN demonstration
+    optimized_E, true_E = pinn_optimization()
