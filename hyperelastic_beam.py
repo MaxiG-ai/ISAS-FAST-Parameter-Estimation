@@ -3,13 +3,11 @@ import jax
 import jax.numpy as np
 import os
 
-
 # Import JAX-FEM specific modules.
 from jax_fem.problem import Problem
 from jax_fem.solver import solver
 from jax_fem.utils import save_sol
 from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
-
 
 # Define constitutive relationship.
 class HyperElasticity(Problem):
