@@ -1,5 +1,5 @@
-# Physics-Informed Neural Network for linear elastic Material Parameter Identification
-# Minimal example based on the linear elastic beam problem
+# Physics-Informed Neural Network for hyperelastic Material Parameter Identification
+# Minimal example based on the hyperelastic beam problem
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from functools import partial
 
 class PINN:
     """
-    Physics-Informed Neural Network for linear elastic material identification.
+    Physics-Informed Neural Network for hyperelastic material identification.
     This PINN learns material parameters (E, nu) from displacement measurements.
     """
     
@@ -64,24 +64,41 @@ class PINN:
                 x = jnp.tanh(x)
         return x
     
-    def kinematic_equation(self, u):
-        """Compute the strain using automatic differentiation."""
-        u_grad = jax.grad(u)
-        epsilon = 0.5 * (u_grad + u_grad.transpose(0,1,3,2))
-        return epsilon
+    def hyperelastic_energy(self, F, E, nu):
+        """
+        Neo-Hookean hyperelastic strain energy density.
+        This is the same physics as in the original hyperelastic_beam.py
+        
+        Args:
+            F: Deformation gradient tensor
+            E: Young's modulus
+            nu: Poisson's ratio
+        
+        Returns:
+            Strain energy density
+        """
+        # Convert to Lamé parameters
+        mu = E / (2.0 * (1.0 + nu))
+        kappa = E / (3.0 * (1.0 - 2.0 * nu))
+        
+        # Compute invariants
+        J = jnp.linalg.det(F)
+        Jinv = J**(-2.0 / 3.0)
+        I1 = jnp.trace(F.T @ F)
+        
+        # Neo-Hookean energy
+        energy = (mu / 2.0) * (Jinv * I1 - 3.0) + (kappa / 2.0) * (J - 1.0)**2
+        return energy
     
-    def constitutive_equation(self, E, nu):
-        """Calculate Lamé's Parameters and the strain for the computatin of sigma"""
-        mu = E/(2.*(1.+nu))
-        lmbda = E*nu/((1+nu)*(1-2*nu))
-        epsilon = self.kinematic_equation()
-        """Compute the stress"""
-        sigma = lmbda * jnp.trace(epsilon) * jnp.eye(self.dim) + 2*mu*epsilon
-        return sigma
+    def first_pk_stress(self, F, E, nu):
+        """
+        Compute first Piola-Kirchhoff stress using automatic differentiation.
+        """
+        energy_fn = lambda F_: self.hyperelastic_energy(F_, E, nu)
+        P = jax.grad(energy_fn)(F)
+        return P
     
-    def boundary_conditions(self, coords):
-    
-    def compute_physics_loss(self, params, material_params, coords, target_sigma):
+    def compute_physics_loss(self, params, material_params, coords, target_displacements):
         """
         Compute physics-informed loss combining data fitting and physics constraints.
         
@@ -97,15 +114,11 @@ class PINN:
         E, nu = material_params
         
         # Neural network predictions
-        jax.vmap(self.neural_network, in_axes=(None, 0))(params, coords)
-        pred_sigma = self.constitutive_equation(E, nu)
+        pred_displacements = jax.vmap(self.neural_network, in_axes=(None, 0))(params, coords)
         
-        # Physics fitting loss
-        physics_loss = jnp.mean((pred_sigma - target_sigma)**2)
-
-        # Data loss
-        data_loss = jnp.mean((pred_E - target_E)**2) + jnp.mean((pred_nu - target_nu)**2)
-
+        # Data fitting loss
+        data_loss = jnp.mean((pred_displacements - target_displacements)**2)
+        
         # Physics loss: compute equilibrium residual
         def displacement_field(x):
             return self.neural_network(params, x)
@@ -138,10 +151,10 @@ class PINN:
 
 def generate_synthetic_data():
     """
-    Generate synthetic displacement data for a linear elastic beam problem.
-    This simulates the result of the original linear elastic_beam.py example.
+    Generate synthetic displacement data for a hyperelastic beam problem.
+    This simulates the result of the original hyperelastic_beam.py example.
     """
-    print("Generating synthetic linear elastic beam data...")
+    print("Generating synthetic hyperelastic beam data...")
     
     # True material parameters (what we want to recover)
     E_true = 10.0
@@ -155,7 +168,7 @@ def generate_synthetic_data():
     
     coords = jnp.array(jnp.meshgrid(x, y, z, indexing='ij')).reshape(3, -1).T
     
-    # Simulate realistic linear elastic displacements
+    # Simulate realistic hyperelastic displacements
     # This is a simplified analytical approximation of the FEM solution
     def analytical_displacement(coord):
         x, y, z = coord
@@ -175,12 +188,12 @@ def generate_synthetic_data():
 
 def run_pinn_optimization():
     """
-    Main PINN optimization for linear elastic material parameter identification.
+    Main PINN optimization for hyperelastic material parameter identification.
     """
     print("=" * 70)
-    print("linear elastic PINN: MATERIAL PARAMETER IDENTIFICATION")
+    print("hyperelastic PINN: MATERIAL PARAMETER IDENTIFICATION")
     print("=" * 70)
-    print("Objective: Learn linear elastic material properties from displacement data")
+    print("Objective: Learn hyperelastic material properties from displacement data")
     print()
     
     # Generate synthetic data
@@ -263,8 +276,8 @@ def run_pinn_optimization():
     print(f"  Relative RMSE:                  {(rmse/max_displacement)*100:.3f}%")
     
     print()
-    print("KEY linear elastic PINN CONCEPTS DEMONSTRATED:")
-    print("1. Neo-Hookean linear elastic constitutive model")
+    print("KEY hyperelastic PINN CONCEPTS DEMONSTRATED:")
+    print("1. Neo-Hookean hyperelastic constitutive model")
     print("2. Deformation gradient and finite strain theory")
     print("3. First Piola-Kirchhoff stress computation via autodiff")
     print("4. Physics-informed loss combining data and equilibrium")
@@ -275,7 +288,7 @@ def run_pinn_optimization():
 
 
 if __name__ == "__main__":
-    # Run the linear elastic PINN demonstration
+    # Run the hyperelastic PINN demonstration
     try:
         optimized_params, true_params = run_pinn_optimization()
         print(f"\nSUCCESS: PINN optimization completed!")
