@@ -1,4 +1,4 @@
-import numpy as np
+import jax.numpy as np
 
 """
     Extended Calman Filter. Implements its predict and update function which are called recursively.

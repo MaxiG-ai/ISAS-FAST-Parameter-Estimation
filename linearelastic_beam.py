@@ -2,8 +2,11 @@
 import jax.numpy as np
 import numpy as onp
 import os
-import pypardiso
+#import pypardiso
 import scipy
+
+from LinearElasticity.problem import LinearElasticity
+
 
 # Import JAX-FEM specific modules.
 from jax_fem.problem import Problem
@@ -11,6 +14,7 @@ from jax_fem.solver import solver
 from jax_fem.utils import save_sol
 from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
 from jax_fem import logger
+
 
 import logging
 logger.setLevel(logging.DEBUG)
@@ -107,8 +111,8 @@ problem = LinearElasticity(mesh,
                            location_fns=location_fns)
 
 # Solve the defined problem.
-sol_list = solver(problem, solver_options={'custom_solver': pardiso_solver})
-# sol_list = solver(problem, solver_options={'umfpack_solver': {}})
+#sol_list = solver(problem, solver_options={'custom_solver': pardiso_solver})
+sol_list = solver(problem, solver_options={'umfpack_solver': {}})
 
 # Postprocess for stress evaluations
 # (num_cells, num_quads, vec, dim)
