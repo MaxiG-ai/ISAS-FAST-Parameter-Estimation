@@ -8,9 +8,12 @@
 
 import jax
 import jax.numpy as jnp
+import jax.tree_util
 import equinox as eqx
 import optax
 import time
+import csv
+from datetime import datetime
 
 # For reproducibility
 key = jax.random.PRNGKey(42)
@@ -55,6 +58,11 @@ class MaterialParameters(eqx.Module):
 def calculate_pde_residual(model, params, x, y, z):
     """Calculates the Navier-Cauchy equation residual for a single point."""
     
+    # Defensive: ensure x, y, z are scalars (not arrays)
+    assert jnp.shape(x) == (), f"x shape: {jnp.shape(x)}"
+    assert jnp.shape(y) == (), f"y shape: {jnp.shape(y)}"
+    assert jnp.shape(z) == (), f"z shape: {jnp.shape(z)}"
+
     # Lamé parameters are derived from the trainable E and nu
     mu = params.E / (2 * (1 + params.nu))
     lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
@@ -63,10 +71,15 @@ def calculate_pde_residual(model, params, x, y, z):
     # JAX's hessian is perfect for this. It computes d2f/(dxi dxj).
     # We apply it to each component of the displacement vector u = [u0, u1, u2].
     u = lambda x, y, z: model(x, y, z)
-    
-    hessian_u0 = jax.hessian(lambda x,y,z: u(x,y,z)[0])(x, y, z)
-    hessian_u1 = jax.hessian(lambda x,y,z: u(x,y,z)[1])(x, y, z)
-    hessian_u2 = jax.hessian(lambda x,y,z: u(x,y,z)[2])(x, y, z)
+
+    hessian_u0 = jax.hessian(lambda x, y, z: u(x, y, z)[0])(x, y, z)
+    hessian_u1 = jax.hessian(lambda x, y, z: u(x, y, z)[1])(x, y, z)
+    hessian_u2 = jax.hessian(lambda x, y, z: u(x, y, z)[2])(x, y, z)
+
+    # Defensive: ensure hessians are at least 2D
+    hessian_u0 = jnp.atleast_2d(hessian_u0)
+    hessian_u1 = jnp.atleast_2d(hessian_u1)
+    hessian_u2 = jnp.atleast_2d(hessian_u2)
 
     # The Navier-Cauchy residual for zero body force is: (lmbda + mu) * grad(div(u)) + mu * laplacian(u)
     # laplacian(u_i) = trace(hessian(u_i))
@@ -82,20 +95,22 @@ def calculate_pde_residual(model, params, x, y, z):
     res_0 = (lmbda + mu) * grad_div_u_0 + mu * laplacian_u0
     res_1 = (lmbda + mu) * grad_div_u_1 + mu * laplacian_u1
     res_2 = (lmbda + mu) * grad_div_u_2 + mu * laplacian_u2
-    
+
     return jnp.array([res_0, res_1, res_2])
 
 
 def calculate_traction(model, params, x, y, z):
     """Calculates the traction vector sigma . n"""
-    jac_u = jax.jacfwd(lambda x,y,z: model(x,y,z))(x, y, z)
+    jac_u = jax.jacfwd(lambda x, y, z: model(x, y, z))(x, y, z)
+    jac_u = jnp.atleast_2d(jac_u)
     epsilon = 0.5 * (jac_u + jac_u.T)
-    
+    epsilon = jnp.atleast_2d(epsilon)
+
     mu = params.E / (2 * (1 + params.nu))
     lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
-    
+
     sigma = lmbda * jnp.trace(epsilon) * jnp.eye(3) + 2 * mu * epsilon
-    
+
     # Normal vector for the right face (x=Lx) is n = [1, 0, 0]
     n = jnp.array([1., 0., 0.])
     traction = sigma @ n
@@ -157,7 +172,7 @@ def train_step(trainable_params, opt_state, batch):
     updates, opt_state = optimizer.update(grads, opt_state, trainable_params)
     trainable_params = eqx.apply_updates(trainable_params, updates)
     
-    return trainable_params, opt_state, loss_val
+    return trainable_params, opt_state, loss_val, grads
 
 def generate_ground_truth_data(key, num_points):
     """
@@ -202,6 +217,7 @@ if __name__ == '__main__':
     
     # Training settings
     learning_rate = 1e-4
+    learning_rate_material=1e-1
     num_steps = 20000
     
     # Number of points to sample for each loss term per step
@@ -219,11 +235,36 @@ if __name__ == '__main__':
     material_params = MaterialParameters(E_init=40e3, nu_init=0.45)
     
     # Combine model and material params into a single PyTree for the optimizer
-    trainable_params = (model, material_params)
+    trainable = (model, material_params)
     
-    # Initialize the Adam optimizer
-    optimizer = optax.adam(learning_rate=learning_rate)
-    opt_state = optimizer.init(trainable_params)
+    # Filter out non-trainable/static parts
+    params, static = eqx.partition(trainable, eqx.is_array)
+    
+    # Label each parameter as 'material' or 'model' (compatible with all Equinox versions)
+    def label_param(x):
+        # If the parent is MaterialParameters, label as 'material', else 'model'
+        # We check the type of the object containing the leaf
+        # Since we only have two modules, this is safe
+        if isinstance(x, MaterialParameters):
+            # This is the module, not the leaf, so skip
+            return None
+        return 'material' if hasattr(x, 'shape') and x.shape == () and hasattr(params, 'E') and (x is params.E or x is params.nu) else 'model'
+
+    # But the above is not robust for pytree leaves, so instead:
+    # We know params is a tuple: (model_params, material_params)
+    # We want to label all leaves in model_params as 'model', all in material_params as 'material'
+    def label_tree(tree, label):
+        return jax.tree_util.tree_map(lambda _: label, tree)
+    param_labels = (label_tree(params[0], 'model'), label_tree(params[1], 'material'))
+
+    optimizer = optax.multi_transform(
+        {
+            'model': optax.adam(learning_rate=learning_rate),
+            'material': optax.adam(learning_rate=learning_rate_material)
+        },
+        param_labels=param_labels
+    )
+    opt_state = optimizer.init(params)
 
     # --- Data Generation ---
     data_coords, data_displacements = generate_ground_truth_data(data_key, N_data)
@@ -232,7 +273,15 @@ if __name__ == '__main__':
     # --- Training Loop ---
     print("\n--- Starting PINN Training ---")
     start_time = time.time()
-    
+
+    # Prepare CSV file
+    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    csv_filename = f"results/{now_str}-training-run.csv"
+    csv_fields = ["step", "loss", "E_pred", "nu_pred", "grad_E", "grad_nu", "elapsed_time"]
+    csv_file = open(csv_filename, mode="w", newline="")
+    csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
+    csv_writer.writeheader()
+
     for step in range(num_steps + 1):
         # Sample points for the current batch
         iter_key, train_key = jax.random.split(train_key)
@@ -240,32 +289,55 @@ if __name__ == '__main__':
 
         # PDE collocation points (randomly inside the beam)
         pde_points = jax.random.uniform(pde_key, shape=(N_pde, 3)) * jnp.array([Lx, Ly, Lz])
-        
+
         # Dirichlet boundary points (left face, x=0)
         dirichlet_points = jax.random.uniform(dir_key, shape=(N_bc, 3)) * jnp.array([0., Ly, Lz])
-        
+
         # Neumann boundary points (right face, x=Lx)
         neumann_points = jax.random.uniform(neu_key, shape=(N_bc, 3)) * jnp.array([Lx, Ly, Lz])
         # Force x to be exactly Lx
         neumann_points = neumann_points.at[:, 0].set(Lx)
-        
+
         # Assemble batch
         batch = (pde_points, dirichlet_points, neumann_points, data_points)
 
         # Perform a training step
-        trainable_params, opt_state, loss = train_step(trainable_params, opt_state, batch)
-        
-        if step % 500 == 0:
+        trainable_params = eqx.combine(params, static)
+        trainable_params, opt_state, loss, grads = train_step(trainable_params, opt_state, batch)
+
+        params, static = eqx.partition(trainable_params, eqx.is_array)
+
+        if step % 200 == 0:
             current_model, current_params = trainable_params
-            E_pred = current_params.E
-            nu_pred = current_params.nu
-            
+            E_pred = float(current_params.E)
+            nu_pred = float(current_params.nu)
+
+            model_grads, material_grads = grads
+            grad_E = float(material_grads.E)
+            grad_nu = float(material_grads.nu)
+
             elapsed_time = time.time() - start_time
+            print(f"Grad E: {grad_E}, Grad nu:{grad_nu}\n")
             print(f"Step: {step:5d}, Loss: {loss:.4e}, E_pred: {E_pred:.2f}, nu_pred: {nu_pred:.4f}, Time: {elapsed_time:.2f}s")
+
+            # Write to CSV
+            csv_writer.writerow({
+                "step": step,
+                "loss": float(loss),
+                "E_pred": E_pred,
+                "nu_pred": nu_pred,
+                "grad_E": grad_E,
+                "grad_nu": grad_nu,
+                "elapsed_time": elapsed_time
+            })
+            csv_file.flush()
             start_time = time.time()
-            
+
+    csv_file.close()
+
     # --- Final Result ---
     print("\n--- Training Complete ---")
     final_model, final_params = trainable_params
     print(f"Final Prediction -> E: {final_params.E:.2f} (True Value: 70000.00)")
     print(f"Final Prediction -> nu: {final_params.nu:.4f} (True Value: 0.3000)")
+    print(f"Results written to {csv_filename}")
