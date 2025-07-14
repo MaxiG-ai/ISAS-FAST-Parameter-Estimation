@@ -7,7 +7,10 @@ class LinearElasticity(Problem):
         self.E = E
         self.nu = nu
         self.mu = E / (2. * (1. + nu))
-        self.lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))    
+        self.lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
+
+    def get_material_parameters(self):
+        return self.E, self.nu
 
     # The function 'get_tensor_map' overrides base class method. Generally, JAX-FEM 
     # solves -div(f(u_grad)) = b. Here, we have f(u_grad) = sigma.

@@ -5,10 +5,10 @@ from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
 from jax_fem.solver import solver
 
 
-def run_and_solve(E, nu, problem):
+def run_and_solve(problem):
+    E, nu = problem.get_material_parameters()
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
-
     sol_list = solver(problem, solver_options={'umfpack_solver': {}})
     u_grad = problem.fes[0].sol_to_grad(sol_list[0])
     epsilon = 0.5 * (u_grad + u_grad.transpose(0,1,3,2))

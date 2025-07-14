@@ -3,6 +3,7 @@ import jax.numpy as np
 
 import numpy as onp
 import os
+import matplotlib.pyplot as plt
 
 from LinearElasticity.problem import LinearElasticity
 from LinearElasticity.LinearElasticityEKF import LinearElasticityEKF
@@ -17,7 +18,7 @@ from jax_fem import logger
 import logging
 logger.setLevel(logging.DEBUG)
 
-# Material properties.
+# Material properties. Example inital values
 def _init(E=70e3, nu=0.3):
     return E, nu
 
@@ -32,10 +33,8 @@ if __name__ == "__main__":
                             dirichlet_bc_info=dirichlet_bc_info,
                             location_fns=location_fns)
     E, nu = _init()
-    problem.set_material_parameters(E, nu)
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))  
-
     x0 = np.array([E, nu])
     P0 = np.array([[1e8, 0], [0, 0.01]])
     Q = np.array([[1e2, 0], [0, 1e-4]])
@@ -45,14 +44,29 @@ if __name__ == "__main__":
     R = np.diag(np.concatenate([np.asarray([disp_var] * 186), np.asarray([stress_var] * 38)]))
     ekf = LinearElasticityEKF(Q=Q, R=R, x0=x0, P0=P0)
 
+    estimated_states = []
+    measured_states = []
     ### Solve problem and improve model
     for _ in range (5):
-        u, vm_stress = run_and_solve(E, nu, problem=problem)
+        x, _ = ekf.get_state()
+        E, nu = x
+        problem.set_material_parameters(E, nu)
+        u, vm_stress = run_and_solve(problem=problem)
         z = np.concatenate([u, vm_stress])
         z = z + onp.random.normal(0, 1, size=z.shape)
         ekf.predict()
         ekf.update(z)
         x1, _ = ekf.get_state()
-        E, nu = x1
-        problem.set_material_parameters(E, nu)
-        print(x1)
+        x1_measured = problem.get_material_parameters()
+        estimated_states.append(x1)
+        measured_states.append(x1_measured)
+
+    estimated_E = [a[0] for a in estimated_states]
+    estimated_nu = [a[1] for a in estimated_states]
+    measured_E = [a[0] for a in measured_states]
+    measured_nu = [a[1] for a in measured_states]
+
+    plt.plot(estimated_E, color="red", label="EKF estimate")
+    plt.plot(measured_E, color="blue", label="Simulation Measurement")
+    plt.legend()
+    plt.savefig("plots/E.pdf")

@@ -23,7 +23,7 @@ class LinearElasticityEKF(ExtendedKalmanFilter):
                             dirichlet_bc_info=dirichlet_bc_info,
                             location_fns=location_fns)
             problem.set_material_parameters(E, nu)
-            u, vm_stress = run_and_solve(E, nu, problem)
+            u, vm_stress = run_and_solve(problem)
 
             return np.concatenate([u, vm_stress])
             
