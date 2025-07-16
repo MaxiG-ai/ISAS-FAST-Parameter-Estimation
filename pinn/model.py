@@ -240,12 +240,22 @@ if __name__ == '__main__':
     # Filter out non-trainable/static parts
     params, static = eqx.partition(trainable, eqx.is_array)
     
+    # Label each parameter as 'material' or 'model' (compatible with all Equinox versions)
+    def label_param(x):
+        # If the parent is MaterialParameters, label as 'material', else 'model'
+        # We check the type of the object containing the leaf
+        # Since we only have two modules, this is safe
+        if isinstance(x, MaterialParameters):
+            # This is the module, not the leaf, so skip
+            return None
+        return 'material' if hasattr(x, 'shape') and x.shape == () and hasattr(params, 'E') and (x is params.E or x is params.nu) else 'model'
 
-    # Robust labeling: all leaves in model_params as 'model', all in material_params as 'material'
-    param_labels = (
-        jax.tree_util.tree_map(lambda _: 'model', params[0]),
-        jax.tree_util.tree_map(lambda _: 'material', params[1])
-    )
+    # But the above is not robust for pytree leaves, so instead:
+    # We know params is a tuple: (model_params, material_params)
+    # We want to label all leaves in model_params as 'model', all in material_params as 'material'
+    def label_tree(tree, label):
+        return jax.tree_util.tree_map(lambda _: label, tree)
+    param_labels = (label_tree(params[0], 'model'), label_tree(params[1], 'material'))
 
     optimizer = optax.multi_transform(
         {
