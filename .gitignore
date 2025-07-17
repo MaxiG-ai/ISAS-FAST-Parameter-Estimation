@@ -8,3 +8,10 @@
 
 # ignoring data
 data/
+
+# ignoring .pyc files
+*.pyc
+
+# ignoring pinn/results
+pinn/results/
+results/
