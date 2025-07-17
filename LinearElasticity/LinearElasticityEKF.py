@@ -23,9 +23,11 @@ class LinearElasticityEKF(ExtendedKalmanFilter):
                             dirichlet_bc_info=dirichlet_bc_info,
                             location_fns=location_fns)
             problem.set_material_parameters(E, nu)
-            u, vm_stress = run_and_solve(problem)
+            #u, vm_stress = run_and_solve(problem)
+            u, _ = run_and_solve(problem)
 
-            return np.concatenate([u, vm_stress])
+            #return np.concatenate([u, vm_stress])
+            return u
             
 
         def H_jacobian(x, epsilon=1e-05):

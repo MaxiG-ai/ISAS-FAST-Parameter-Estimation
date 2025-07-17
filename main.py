@@ -39,20 +39,24 @@ if __name__ == "__main__":
     P0 = np.array([[1e8, 0], [0, 0.01]])
     Q = np.array([[1e2, 0], [0, 1e-4]])
     
-    disp_var = 1e-12
-    stress_var = 1e10
-    R = np.diag(np.concatenate([np.asarray([disp_var] * 186), np.asarray([stress_var] * 38)]))
+    disp_var = 1e-7
+    stress_var = 1e3
+#    R = np.diag(np.concatenate([np.asarray([disp_var] * 186), np.asarray([stress_var] * 38)]))
+    R = np.diag(np.asarray([disp_var] * 1852))
     ekf = LinearElasticityEKF(Q=Q, R=R, x0=x0, P0=P0)
 
     estimated_states = []
     measured_states = []
     ### Solve problem and improve model
-    for _ in range (5):
+    i = 0
+    for _ in range(10):
         x, _ = ekf.get_state()
         E, nu = x
         problem.set_material_parameters(E, nu)
-        u, vm_stress = run_and_solve(problem=problem)
-        z = np.concatenate([u, vm_stress])
+        #u, vm_stress = run_and_solve(problem=problem)
+        u, _ = run_and_solve(problem=problem)
+        #z = np.concatenate([u, vm_stress])
+        z = u
         z = z + onp.random.normal(0, 1, size=z.shape)
         ekf.predict()
         ekf.update(z)
@@ -60,13 +64,18 @@ if __name__ == "__main__":
         x1_measured = problem.get_material_parameters()
         estimated_states.append(x1)
         measured_states.append(x1_measured)
+        i += 1
+        print(f"======={i}=======")
 
     estimated_E = [a[0] for a in estimated_states]
     estimated_nu = [a[1] for a in estimated_states]
     measured_E = [a[0] for a in measured_states]
     measured_nu = [a[1] for a in measured_states]
 
+    print(estimated_E)
+    print(measured_E)
+
     plt.plot(estimated_E, color="red", label="EKF estimate")
     plt.plot(measured_E, color="blue", label="Simulation Measurement")
     plt.legend()
-    plt.savefig("plots/E.pdf")
+    plt.savefig("plots/E5.pdf")
