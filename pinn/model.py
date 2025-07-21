@@ -8,13 +8,7 @@
 
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import equinox as eqx
-import optax
-import time
-import csv
-from datetime import datetime
-import os
 
 # For reproducibility
 key = jax.random.PRNGKey(42)
@@ -30,8 +24,8 @@ class PINN(eqx.Module):
 
     def __init__(self, key):
         """Initializes the neural network."""
-        # Using 4 hidden layers with 128 neurons each. Tanh is a good activation for PINNs.
-        self.mlp = eqx.nn.MLP(in_size=3, out_size=3, width_size=128, depth=4, activation=jnp.tanh, key=key)
+        # Using 4 hidden layers with 64 neurons each. Tanh is a good activation for PINNs.
+        self.mlp = eqx.nn.MLP(in_size=3, out_size=3, width_size=64, depth=4, activation=jnp.tanh, key=key)
 
     def __call__(self, x, y, z):
         """Performs a forward pass."""
@@ -98,9 +92,9 @@ def calculate_pde_residual(model, params, x, y, z):
     grad_div_u_1 = hessian_u0[1][0] + hessian_u1[1][1] + hessian_u2[1][2]
     grad_div_u_2 = hessian_u0[2][0] + hessian_u1[2][1] + hessian_u2[2][2]
 
-    res_0 = (lmbda + mu) * grad_div_u_0 + mu * laplacian_u0
-    res_1 = (lmbda + mu) * grad_div_u_1 + mu * laplacian_u1
-    res_2 = (lmbda + mu) * grad_div_u_2 + mu * laplacian_u2
+    res_0 = -1 * ((lmbda + mu) * grad_div_u_0 + mu * laplacian_u0)
+    res_1 = -1 * ((lmbda + mu) * grad_div_u_1 + mu * laplacian_u1)
+    res_2 = -1 * ((lmbda + mu) * grad_div_u_2 + mu * laplacian_u2)
 
     return jnp.array([res_0, res_1, res_2])
 
@@ -171,11 +165,6 @@ def calculate_total_loss(trainable_params, batch, loss_weights):
 @eqx.filter_jit
 def train_step(trainable_params, opt_state, batch, loss_weights, optimizer):
     """Performs a single training step."""
-    
-    # The loss function needs to be wrapped to only return the total loss for grad
-    def loss_fn(params):
-        total_loss, _ = calculate_total_loss(params, batch, loss_weights)
-        return total_loss
 
     # Get loss value and gradients
     (loss_val, individual_losses), grads = eqx.filter_value_and_grad(

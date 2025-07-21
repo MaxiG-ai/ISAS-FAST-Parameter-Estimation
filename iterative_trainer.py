@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 
 # Import from our project
-from pinn.model import PINN, MaterialParameters, train_step, calculate_total_loss
+from pinn.model import PINN, MaterialParameters, train_step
 from LinearElasticity.simulation import LinearElasticitySimulation
 
 def main():
@@ -21,14 +21,14 @@ def main():
     Lx, Ly, Lz = 10., 2., 2.
     
     # Training settings
-    num_iterations = 10 # Number of outer loops (FEM recalculations)
-    num_pinn_steps = 2000 # Number of PINN training steps per iteration
+    num_iterations = 5 # Number of outer loops (FEM recalculations)
+    num_pinn_steps = 500 # Number of PINN training steps per iteration
     learning_rate_model = 1e-4
-    learning_rate_E = 2e2 # Adjusted learning rate for E
-    learning_rate_nu = 5e-4 # Adjusted learning rate for nu
+    learning_rate_E = 5e2 # Adjusted learning rate for E
+    learning_rate_nu = 1e-3 # Adjusted learning rate for nu
     
     # Loss weights
-    loss_weights = (1.0, 10.0, 100.0) # (w_pde, w_bc, w_data)
+    loss_weights = (1.0, 10.0, 1.0) # (w_pde, w_bc, w_data)
 
     # Number of points to sample for each loss term
     N_pde = 2000
