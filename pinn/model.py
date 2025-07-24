@@ -24,8 +24,8 @@ class PINN(eqx.Module):
 
     def __init__(self, key):
         """Initializes the neural network."""
-        # Using 4 hidden layers with 64 neurons each. Tanh is a good activation for PINNs.
-        self.mlp = eqx.nn.MLP(in_size=3, out_size=3, width_size=64, depth=4, activation=jnp.tanh, key=key)
+        # Using 4 hidden layers with 128 neurons each. Tanh is a good activation for PINNs.
+        self.mlp = eqx.nn.MLP(in_size=3, out_size=3, width_size=128, depth=4, activation=jnp.tanh, key=key)
 
     def __call__(self, x, y, z):
         """Performs a forward pass."""
@@ -92,9 +92,9 @@ def calculate_pde_residual(model, params, x, y, z):
     grad_div_u_1 = hessian_u0[1][0] + hessian_u1[1][1] + hessian_u2[1][2]
     grad_div_u_2 = hessian_u0[2][0] + hessian_u1[2][1] + hessian_u2[2][2]
 
-    res_0 = -1 * ((lmbda + mu) * grad_div_u_0 + mu * laplacian_u0)
-    res_1 = -1 * ((lmbda + mu) * grad_div_u_1 + mu * laplacian_u1)
-    res_2 = -1 * ((lmbda + mu) * grad_div_u_2 + mu * laplacian_u2)
+    res_0 = (lmbda + mu) * grad_div_u_0 + mu * laplacian_u0
+    res_1 = (lmbda + mu) * grad_div_u_1 + mu * laplacian_u1
+    res_2 = (lmbda + mu) * grad_div_u_2 + mu * laplacian_u2
 
     return jnp.array([res_0, res_1, res_2])
 
@@ -115,6 +115,56 @@ def calculate_traction(model, params, x, y, z):
     n = jnp.array([1., 0., 0.])
     traction = sigma @ n
     return traction
+
+
+@eqx.filter_jit
+def calculate_physics_loss(trainable_params, batch, loss_weights):
+    """Calculates the weighted physics-based loss (PDE and BCs)."""
+    model, material_params = trainable_params
+    pde_points, dirichlet_points, neumann_points, _ = batch
+    w_pde, w_bc, _ = loss_weights
+
+    # 1. PDE Loss
+    v_pde_res = jax.vmap(calculate_pde_residual, in_axes=(None, None, 0, 0, 0))
+    pde_residuals = v_pde_res(model, material_params, pde_points[:,0], pde_points[:,1], pde_points[:,2])
+    loss_pde = jnp.mean(pde_residuals**2)
+
+    # 2. Boundary Condition Loss
+    v_model = jax.vmap(model, in_axes=(0, 0, 0))
+    
+    # Dirichlet BC
+    dirichlet_preds = v_model(dirichlet_points[:,0], dirichlet_points[:,1], dirichlet_points[:,2])
+    loss_dirichlet = jnp.mean(dirichlet_preds**2)
+    
+    # Neumann BC
+    v_traction = jax.vmap(calculate_traction, in_axes=(None, None, 0, 0, 0))
+    traction_preds = v_traction(model, material_params, neumann_points[:,0], neumann_points[:,1], neumann_points[:,2])
+    traction_target = jnp.array([0., 0., 100.])
+    loss_neumann = jnp.mean((traction_preds - traction_target)**2)
+    
+    loss_bc = loss_dirichlet + loss_neumann
+    
+    total_loss = w_pde * loss_pde + w_bc * loss_bc
+    
+    return total_loss, (loss_pde, loss_bc, jnp.array(0.))
+
+
+@eqx.filter_jit
+def calculate_data_loss(trainable_params, batch, loss_weights):
+    """Calculates the weighted data-based loss."""
+    model, _ = trainable_params # Material parameters are not used here
+    _, _, _, data_points = batch
+    _, _, w_data = loss_weights
+
+    # Data Loss
+    v_model = jax.vmap(model, in_axes=(0, 0, 0))
+    data_coords, data_displacements = data_points
+    data_preds = v_model(data_coords[:,0], data_coords[:,1], data_coords[:,2])
+    loss_data = jnp.mean((data_preds - data_displacements)**2)
+
+    total_loss = w_data * loss_data
+    
+    return total_loss, (jnp.array(0.), jnp.array(0.), loss_data)
 
 
 @eqx.filter_jit
@@ -163,15 +213,22 @@ def calculate_total_loss(trainable_params, batch, loss_weights):
 # --------------------------------------------------------------------------------
 
 @eqx.filter_jit
-def train_step(trainable_params, opt_state, batch, loss_weights, optimizer):
+def train_step(trainable_params, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params, stage_name):
     """Performs a single training step."""
 
-    # Get loss value and gradients
+    # Get loss value and gradients w.r.t. the full set of loss parameters
     (loss_val, individual_losses), grads = eqx.filter_value_and_grad(
-        calculate_total_loss, has_aux=True
-    )(trainable_params, batch, loss_weights)
+        loss_fn, has_aux=True
+    )(loss_params, batch, loss_weights)
     
-    updates, opt_state = optimizer.update(grads, opt_state, trainable_params)
+    # In the optimization stage, the gradients are a tuple (grads_for_model, grads_for_params).
+    # We only need the second part for the optimizer.
+    if stage_name == "optimize":
+        grads_to_apply = grads[1]
+    else:
+        grads_to_apply = grads
+
+    updates, opt_state = optimizer.update(grads_to_apply, opt_state, trainable_params)
     trainable_params = eqx.apply_updates(trainable_params, updates)
     
     return trainable_params, opt_state, loss_val, individual_losses, grads
