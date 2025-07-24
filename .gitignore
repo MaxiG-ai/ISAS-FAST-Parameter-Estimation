@@ -15,3 +15,6 @@ data/
 # ignoring pinn/results
 pinn/results/
 results/
+
+# ignoring jax-fem from github
+jax-fem/*

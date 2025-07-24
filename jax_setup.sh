@@ -1,0 +1,7 @@
+!/bin/bash
+conda init
+source ~/.bashrc
+conda env create -f environment.yml
+conda activate jax-fem-env
+pip install -U "jax[cuda12]"
+pip install jax-fem
