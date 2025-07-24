@@ -39,8 +39,8 @@ if __name__ == "__main__":
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))  
     x0 = np.array([E, nu])
-    P0 = np.array([[1e8, 0], [0, 1e8]])
-    Q = np.array([[1e2, 0], [0, 1e2]])
+    P0 = np.array([[1e10, 0], [0, 1e1]])
+    Q = np.array([[1e10, 0], [0, 1e1]])
     
     disp_var = 10
     stress_var = 1e3
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     
     ### Solve problem and improve model
     i = 0
-    for _ in range(30):
+    for _ in range(10):
         # Init and run problem
         problem_E, problem_nu = _init_problem()
         problem.set_material_parameters(problem_E, problem_nu)
@@ -71,10 +71,22 @@ if __name__ == "__main__":
     measured_E = [_init_problem()[0] for _ in estimated_E]
     measured_nu = [_init_problem()[1] for _ in estimated_nu]
 
-    print(estimated_nu)
-    print(measured_nu)
+    # print(f"Estimated nu: {estimated_nu} Measured nu: {measured_nu}")
+    # print(f"Estimated E: {estimated_E} Measured E: {measured_E}")
 
-    plt.plot(estimated_E, color="red", label="EKF estimate")
-    plt.plot(measured_E, color="blue", label="Simulation Measurement")
-    plt.legend()
-    plt.savefig("plots/nu2.pdf")
+    fig, ax = plt.subplots(nrows=1, ncols=2, tight_layout=True, figsize=(10, 5))
+
+    ax[0].plot(estimated_nu, color="red", label="EKF Estimate")
+    ax[0].plot(measured_nu, color="blue", label="Simulation Measurement")
+    ax[0].legend()
+    ax[0].set_xlabel("Iteration")
+    ax[0].set_ylabel("Poisson's Ratio")
+
+    ax[1].plot(estimated_E, color="red", label="EKF Estimate")
+    ax[1].plot(measured_E, color="blue", label="Simulation Measurement")
+    ax[1].legend()
+    ax[1].set_xlabel("Iteration")
+    ax[1].set_ylabel("Young's Modulus (Pa)")
+
+    fig.suptitle("EKF Estimates of Material Parameters")
+    plt.savefig("plots/EKF_estimate5.pdf")

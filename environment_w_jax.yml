@@ -268,7 +268,7 @@ dependencies:
       - etils==1.5.2
       - fenics-basix==0.6.0
       - gmsh==4.11.1
-      - jax==0.4.30
+      - jax[cuda12]==0.4.30
       - jaxlib==0.4.30
       - jaxtyping==0.2.36
       - opt-einsum==3.4.0
