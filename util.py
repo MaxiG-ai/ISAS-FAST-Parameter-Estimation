@@ -22,7 +22,7 @@ def run_and_solve(problem):
     vm_stress = np.sqrt(3./2. * np.sum(s_dev*s_dev, axis=(1,2)))
     
     u = sol_list[0].flatten()
-    return u[::5], vm_stress[::100], sigma, epsilon
+    return u, vm_stress[::100], sigma, epsilon
 
 
 def _mesh_config():# Specify mesh-related information (second-order tetrahedron element).
