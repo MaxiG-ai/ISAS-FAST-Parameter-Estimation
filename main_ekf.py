@@ -56,7 +56,7 @@ if __name__ == "__main__":
         # Init and run problem
         problem_E, problem_nu = _init_problem()
         problem.set_material_parameters(problem_E, problem_nu)
-        u, _ = run_and_solve(problem=problem)
+        u, _, _, _ = run_and_solve(problem=problem)
 
         # Run EKF
         ekf.predict()
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     ax[1].plot(measured_E, color="blue", label="Simulation Measurement")
     ax[1].legend()
     ax[1].set_xlabel("Iteration")
-    ax[1].set_ylabel("Young's Modulus (Pa)")
+    ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("EKF Estimates of Material Parameters")
     plt.savefig("plots/EKF_estimate5.pdf")
