@@ -36,7 +36,7 @@ This workflow separates the problem into manageable parts: first learn the shape
 ```mermaid
 graph TD
     A[Start] --> B{Stage 0: Generate Ground Truth Data};
-    B --> C{Stage 1: Pre-train PINN on Data};
+    B --> C{Stage 1: Pre-train PINN with Physics Constraints};
     C --> D{Stage 2: Optimize Material Parameters};
     D --> E[End: Predicted E, ν];
 
@@ -44,15 +44,15 @@ graph TD
         B1(Run FEM with E_true, ν_true) --> B2(Get Displacement Field u_fem);
     end
 
-    subgraph "Stage 1: Learn the Deformation"
+    subgraph "Stage 1: Learn Physics-Consistent Deformation"
         C1(Initialize PINN & MaterialParams) -- E_guess, ν_guess --> C2(Freeze MaterialParams);
         C2 --> C3{Train PINN Weights};
-        C3 -- Data Loss: ||u_pinn - u_fem|| --> C3;
+        C3 -- "Total Loss: w_data||u_pinn - u_fem|| + w_pde*PDE + w_bc*BC<br/>Weights: (data=1.0, pde=0.1, bc=0.1)" --> C3;
     end
 
-    subgraph "Stage 2: Discover the Physics"
+    subgraph "Stage 2: Fine-tune Physics"
         D1(Freeze Pre-trained PINN) --> D2{Train MaterialParams E & ν};
-        D2 -- Physics Loss: PDE(u_pinn, E, ν) --> D2;
+        D2 -- "Total Loss: w_pde*PDE + w_bc*BC + w_data||u_pinn - u_fem||<br/>Weights: (pde=1.0, bc=1.0, data=0.1)" --> D2;
     end
 ```
 
@@ -66,25 +66,29 @@ The entire process is orchestrated by the `pinn/iterative_trainer.py` script.
 - **How:** We use a standard **Finite Element Method (FEM)** solver (from `LinearElasticity/simulation.py`) with the *true* material parameters (`E_true`, `ν_true`). This simulation computes the displacement `u(x,y,z)` for points on the beam.
 - **Result:** A set of `(coordinates, displacement)` pairs that represent our experimental data.
 
-### Stage 1: PINN Pre-training (Fitting to Data)
+### Stage 1: PINN Pre-training (Learning Physics-Consistent Deformation)
 
-- **Goal:** Train the PINN to be a perfect mimic of the FEM solution. At this stage, the PINN's only job is to learn to map input coordinates `(x,y,z)` to the correct output displacement `u`.
+- **Goal:** Train the PINN to accurately represent the beam's deformation field while ensuring it respects the underlying physics. This creates a strong foundation for material parameter optimization.
 - **How:**
     1. We initialize the PINN and the `MaterialParameters` (with incorrect starting guesses, e.g., `E=50e3`, `ν=0.2`).
     2. We **freeze the `MaterialParameters`**. Only the neural network's weights and biases are trainable.
-    3. The network is trained using only a **data-matching loss**: `L_data = ||u_pinn - u_fem||²`. This is a standard supervised learning task.
-- **Result:** A neural network that is a differentiable, continuous function accurately representing the beam's deformation field.
+    3. The network is trained using **all three loss components** with carefully chosen weights:
+        - **High weight on data loss** (`w_data = 1.0`): Primary focus on matching the FEM solution
+        - **Moderate weights on physics losses** (`w_pde = 0.1`, `w_bc = 0.1`): Ensures the solution respects physical laws
+- **Why This Works:** By including physics constraints during pre-training, the PINN learns a deformation field that is both accurate (matches data) and physically plausible. This prevents the network from learning non-physical shortcuts that would make Stage 2 optimization impossible.
+- **Result:** A neural network that represents a physically consistent, differentiable approximation of the beam's deformation field.
 
-### Stage 2: Parameter Optimization (Fitting to Physics)
+### Stage 2: Parameter Optimization (Fine-tuning Physics)
 
-- **Goal:** Now that we have a good function for the deformation field (`u_pinn`), we use it to find the material parameters that make the solution physically correct.
+- **Goal:** Now that we have a physics-consistent approximation of the deformation field, fine-tune the material parameters to achieve the best possible satisfaction of the governing equations.
 - **How:**
     1. We **freeze the PINN's weights**. The network's architecture is now static.
     2. The only trainable variables are `E` and `ν` within the `MaterialParameters` object.
-    3. The optimizer's goal is to minimize the **physics loss**, which is composed of two parts:
-        - `L_pde`: The **PDE residual**. We plug the PINN's output (`u_pinn`) and the current estimates for `E` and `ν` into the governing equations of linear elasticity. If the parameters are correct, the equation's residual will be zero.
-        - `L_bc`: The **Boundary Condition loss**. This ensures the solution respects the physical constraints of the problem (e.g., the beam is fixed at one end).
-- **Why it Works:** Because the PINN is a differentiable function, we can use JAX's automatic differentiation to compute the gradient of the `L_physics` with respect to `E` and `ν`. The optimizer follows this gradient, iteratively updating `E` and `ν` until they converge to values that satisfy the underlying physics.
+    3. The optimizer uses **all three loss components** with rebalanced weights:
+        - **High weights on physics losses** (`w_pde = 1.0`, `w_bc = 1.0`): Primary focus on satisfying governing equations
+        - **Lower weight on data loss** (`w_data = 0.1`): Maintains connection to experimental observations
+- **Why it Works:** Because the PINN already represents a physically plausible solution from Stage 1, the optimization landscape for the material parameters is well-behaved. The physics losses can effectively guide the parameters toward their true values while the data loss prevents drift from the experimental observations.
+- **Result:** Material parameters `E` and `ν` that best explain the observed deformation according to the laws of linear elasticity.
 
 ## 5. How to Run the Script
 
@@ -97,3 +101,17 @@ The entire process is orchestrated by the `pinn/iterative_trainer.py` script.
     ```
 
 4. The script will print its progress for each stage. Final results, logs, and plots will be saved to a new, timestamped directory in `pinn/results/`.
+
+## 6. Key Insight: Why Both Stages Need All Loss Components
+
+The critical insight in this implementation is that **both training stages use all three loss components** (data, PDE, and boundary conditions) but with different relative weights:
+
+- **Stage 1 Priority**: Learn accurate deformation field (`w_data = 1.0`) while respecting physics (`w_pde = w_bc = 0.1`)
+- **Stage 2 Priority**: Satisfy governing equations (`w_pde = w_bc = 1.0`) while maintaining data consistency (`w_data = 0.1`)
+
+This approach ensures:
+1. **Stage 1** produces a physics-aware approximation, not just a data-fitting curve
+2. **Stage 2** can successfully optimize material parameters because the PINN already represents a physically plausible solution
+3. **Stability** throughout the optimization process by maintaining connections to both experimental data and physical laws
+
+The alternative approach (Stage 1 with data-only loss, Stage 2 with physics-only loss) often fails because the pre-trained PINN may represent a deformation field that cannot be achieved with any reasonable material parameters, making Stage 2 optimization impossible or unstable.

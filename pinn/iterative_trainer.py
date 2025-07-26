@@ -2,19 +2,17 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import optax
-import time
 import csv
 from datetime import datetime
 import os
 import matplotlib.pyplot as plt
-from collections import namedtuple
 import sys
 
 # Add the project root to the Python path to allow for absolute imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import from our project
-from pinn.model import PINN, MaterialParameters, train_step, calculate_data_loss, calculate_physics_loss
+from pinn.model import PINN, MaterialParameters, train_step, calculate_total_loss
 from LinearElasticity.simulation import LinearElasticitySimulation
 
 def main():
@@ -37,8 +35,11 @@ def main():
     learning_rate_E = 5e1 
     learning_rate_nu = 5e-4
     
-    # Loss weights
-    loss_weights = (1.0, 1.0, 1.0) # (w_pde, w_bc, w_data) - used by different stages
+    # Loss weights for different stages
+    # Stage 1: Focus on data fitting but include physics for consistency
+    pretrain_loss_weights = (0.1, 0.1, 1.0)  # (w_pde, w_bc, w_data)
+    # Stage 2: Focus on physics but keep some data constraint
+    optimize_loss_weights = (1.0, 1.0, 0.1)  # (w_pde, w_bc, w_data)
 
     # Number of points to sample for each loss term
     N_pde = 2000
@@ -79,9 +80,9 @@ def main():
         (model, material_params),
         opt_state_model,
         optimizer_model,
-        calculate_data_loss,
+        calculate_total_loss,  # Changed from calculate_data_loss
         data_points,
-        loss_weights,
+        pretrain_loss_weights,  # Use pretrain-specific weights
         (Lx, Ly, Lz, N_pde, N_bc),
         train_key,
         log_dir
@@ -91,17 +92,18 @@ def main():
     model = history_pretrain['final_model']
     
     # --- Verification after Pre-training ---
-    print("\n--- Verifying Pre-trained PINN with Physics Loss ---")
+    print("\n--- Verifying Pre-trained PINN with All Loss Components ---")
     pde_points = jax.random.uniform(train_key, shape=(N_pde, 3)) * jnp.array([Lx, Ly, Lz])
     dirichlet_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([0., Ly, Lz])
     neumann_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([Lx, Ly, Lz])
     neumann_points = neumann_points.at[:, 0].set(Lx)
     verification_batch = (pde_points, dirichlet_points, neumann_points, data_points)
 
-    physics_loss_val, (pde_loss, bc_loss, _) = calculate_physics_loss(
-        (model, material_params), verification_batch, (1., 1., 0.)
+    total_loss_val, (pde_loss, bc_loss, data_loss) = calculate_total_loss(
+        (model, material_params), verification_batch, (1., 1., 1.)
     )
-    print(f"  Physics Loss after pre-training: {physics_loss_val:.2e} (PDE: {pde_loss:.2e}, BC: {bc_loss:.2e})")
+    print(f"  Total Loss after pre-training: {total_loss_val:.2e}")
+    print(f"  Individual losses - PDE: {pde_loss:.2e}, BC: {bc_loss:.2e}, Data: {data_loss:.2e}")
     print("--- Verification Complete ---")
 
     # Plot the pre-training history
@@ -134,9 +136,9 @@ def main():
         material_params, # Pass only the trainable material parameters
         opt_state_params,
         optimizer_params,
-        calculate_physics_loss,
+        calculate_total_loss,  # Changed from calculate_physics_loss
         data_points,
-        loss_weights,
+        optimize_loss_weights,  # Use optimize-specific weights
         (Lx, Ly, Lz, N_pde, N_bc),
         train_key,
         log_dir,
@@ -244,17 +246,34 @@ def run_training_stage(stage_name, num_steps, trainable_params, opt_state, optim
 
 
 def plot_pretraining_progress(history, save_dir):
-    """Plots the pre-training history."""
-    plt.figure(figsize=(10, 6))
-    plt.plot(history['step'], history['loss_data'], label='Data Loss (Pre-training)', color='green')
+    """Plots the pre-training history showing all loss components."""
+    plt.figure(figsize=(12, 8))
+    
+    # Plot all loss components
+    plt.subplot(2, 1, 1)
+    plt.plot(history['step'], history['total_loss'], label='Total Loss', color='black', linewidth=2)
+    plt.plot(history['step'], history['loss_data'], label='Data Loss (weighted)', color='green', linestyle='--')
+    plt.plot(history['step'], history['loss_pde'], label='PDE Loss (weighted)', color='blue', linestyle='--')
+    plt.plot(history['step'], history['loss_bc'], label='BC Loss (weighted)', color='red', linestyle='--')
     plt.yscale('log')
-    plt.title('Stage 1: PINN Pre-training on Data')
+    plt.title('Stage 1: PINN Pre-training with Physics Constraints')
     plt.xlabel('Training Step')
     plt.ylabel('Loss (log scale)')
     plt.legend()
-    plt.grid(True, which="both", ls="-", alpha=0.5)
+    plt.grid(True, which="both", ls="-", alpha=0.3)
+    
+    # Plot material parameters (though they should be constant in Stage 1)
+    plt.subplot(2, 1, 2)
+    plt.plot(history['step'], history['E_pred'], label='E (Young\'s Modulus)', color='tab:blue')
+    plt.plot(history['step'], history['nu_pred'], label='nu (Poisson\'s Ratio)', color='tab:red')
+    plt.title('Material Parameters During Pre-training (Should Remain Constant)')
+    plt.xlabel('Training Step')
+    plt.ylabel('Parameter Values')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'pretraining_progress.png'))
+    plt.savefig(os.path.join(save_dir, 'pretraining_progress.png'), dpi=150)
     plt.close()
 
 
