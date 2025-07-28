@@ -13,9 +13,5 @@ data/
 # ignoring .pyc files
 *.pyc
 
-# ignoring pinn/results
-pinn/results/
-results/
-
 # ignoring jax-fem from github
 jax-fem/*
