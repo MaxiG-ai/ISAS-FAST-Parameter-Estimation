@@ -1,4 +1,5 @@
 import numpy as np
+import jax.numpy as jnp
 from ekf.ekf import ExtendedKalmanFilter
 from LinearElasticity.problem import LinearElasticity
 from util import run_and_solve, _mesh_config
@@ -24,7 +25,7 @@ class LinearElasticityEKF(ExtendedKalmanFilter):
                             location_fns=location_fns)
             problem.set_material_parameters(E, nu)
             #u, vm_stress = run_and_solve(problem)
-            u, _ = run_and_solve(problem)
+            u, _, _, _ = run_and_solve(problem)
 
             #return np.concatenate([u, vm_stress])
             return u

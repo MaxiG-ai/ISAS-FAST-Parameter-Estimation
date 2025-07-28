@@ -1,7 +1,7 @@
-import jax.numpy as np
+import jax.numpy as jnp
 
 """
-    Extended Calman Filter. Implements its predict and update function which are called recursively.
+    Extended Kalman Filter. Implements its predict and update function which are called recursively.
     
     @param f: Nonlinear state transition function
     @param h: Nonlinear measurement function
@@ -32,7 +32,7 @@ class ExtendedKalmanFilter:
         H = self.H_jacobian(self.x)
         y = z - self.h(self.x)
         S = H @ self.P @ H.T + self.R
-        K = self.P @ H.T @ np.linalg.inv(S)
+        K = self.P @ H.T @ jnp.linalg.inv(S)
         self.x = self.x + K @ y
         self.P = self.P - K @ H @ self.P
 

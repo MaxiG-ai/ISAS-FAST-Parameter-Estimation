@@ -48,6 +48,7 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 
 RUN git clone https://github.com/deepmodeling/jax-fem.git 
 
+RUN pip install optimistix
 # Optional: copy other files like requirements.txt or project code
 # COPY requirements.txt .
 # RUN pip install -r requirements.txt

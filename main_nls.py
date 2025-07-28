@@ -1,5 +1,6 @@
 # Import some useful modules.
 import jax.numpy as np
+import jax
 
 import numpy as onp
 import os
@@ -22,7 +23,7 @@ logger.setLevel(logging.DEBUG)
 def _init(E=50e3, nu=0.1):
     return E, nu
 
-def _init_problem(E=80e3, nu=0.45):
+def _init_problem(E=70e3, nu=0.3):
     return E, nu
 
 if __name__ == "__main__":
@@ -46,12 +47,11 @@ if __name__ == "__main__":
     
     ### Solve problem and improve model
     i = 0
-    for _ in range(10):
-        # Init and run problem
-        problem_E, problem_nu = _init_problem()
-        problem.set_material_parameters(problem_E, problem_nu)
-        _, _, sigma, epsilon = run_and_solve(problem=problem)
-
+    # Init and run problem
+    problem_E, problem_nu = _init_problem()
+    problem.set_material_parameters(problem_E, problem_nu)
+    _, _, sigma, epsilon = run_and_solve(problem=problem)
+    for _ in range(5):
         # Run NLS
         pred_params = lm_solver(init_params, epsilon, sigma)
         estimated_states.append(pred_params)
@@ -83,4 +83,4 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("NLS Estimates of Material Parameters")
-    plt.savefig("plots/NLS_estimate1.pdf")
+    plt.savefig("plots/NLS_estimate2.pdf")

@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import optimistix as optx
+import jax
 
 def lm_solver(init_params, epsilon, sigma_mes):
     """
@@ -14,11 +15,11 @@ def lm_solver(init_params, epsilon, sigma_mes):
     solver = optx.LevenbergMarquardt(
         rtol = 1e-8,
         atol = 1e-8,
-        norm = optx.rms_norm
+        norm = optx.two_norm
     )
 
     # Perform optimization
-    sol = optx.least_squares(residuals, solver, init_params, args=(epsilon, sigma_mes))
+    sol = optx.least_squares(residuals, solver, init_params, args=(epsilon, sigma_mes), max_steps=512)
 
     pred_params = sol.value
 
@@ -46,7 +47,6 @@ def calculate_stress(epsilon, params):
 
     # Calculate stress tensor from strain tensor
     sigma_pred = lmbda * jnp.trace(epsilon) * jnp.eye(3) + 2 * mu * epsilon
-    # sigma_pred = lmbda * epsilon + 2 * mu * epsilon
     return sigma_pred
 
 def residuals(params, epsilon__sigma_mes):
@@ -58,23 +58,17 @@ def residuals(params, epsilon__sigma_mes):
     """
     # Unpack strain and measured stress
     epsilon, sigma_mes = epsilon__sigma_mes
-    # 
+    # Unpack parameters
     E = params[0]
     nu = params[1]
+    # # Ensure E and nu are in valid ranges
+    # # E should be positive, nu should be in [0, 0.5)
+    # E  = jax.nn.softplus(E) + 1e-6
+    # nu = 0.499 * jax.nn.sigmoid(nu)
+
     # Calculate predicted stress
-    sigma_pred = calculate_stress(epsilon, params)
+    sigma_pred = calculate_stress(epsilon, [E, nu])
 
     res_sigma = sigma_pred - sigma_mes
 
-    # Penalty for materialparmeters
-    if E < 0:
-        res_E = 1e3 * E**2
-    else:
-        res_E = 0
-
-    if nu < 0 or nu > 0.5:
-        res_nu = 1e3 * nu**2
-    else:
-        res_nu = 0
-
-    return res_sigma + res_E + res_nu
+    return res_sigma

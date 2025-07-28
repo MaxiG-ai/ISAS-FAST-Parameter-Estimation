@@ -17,3 +17,4 @@ dependencies:
     - gmsh==4.11.1
     - fenics-basix==0.6.0
     - pyfiglet==1.0
+    - optimistix

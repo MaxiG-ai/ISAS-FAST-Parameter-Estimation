@@ -1,6 +1,6 @@
 import os
 
-import jax.numpy as np
+import jax.numpy as jnp
 from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
 from jax_fem.solver import solver
 
@@ -12,17 +12,17 @@ def run_and_solve(problem):
     sol_list = solver(problem, solver_options={'umfpack_solver': {}})
     u_grad = problem.fes[0].sol_to_grad(sol_list[0])
     epsilon = 0.5 * (u_grad + u_grad.transpose(0,1,3,2))
-    sigma = lmbda * np.trace(epsilon, axis1=2, axis2=3)[:,:,None,None] * np.eye(problem.dim) + 2*mu*epsilon
+    sigma = lmbda * jnp.trace(epsilon, axis1=2, axis2=3)[:,:,None,None] * jnp.eye(problem.dim) + 2*mu*epsilon
     cells_JxW = problem.JxW[:,0,:]
-    sigma_average = np.sum(sigma * cells_JxW[:,:,None,None], axis=1) / np.sum(cells_JxW, axis=1)[:,None,None]
+    sigma_average = jnp.sum(sigma * cells_JxW[:,:,None,None], axis=1) / jnp.sum(cells_JxW, axis=1)[:,None,None]
 
     # Von Mises stress
-    s_dev = (sigma_average - 1/problem.dim * np.trace(sigma_average, axis1=1, axis2=2)[:,None,None]
-                                        * np.eye(problem.dim)[None,:,:])
-    vm_stress = np.sqrt(3./2. * np.sum(s_dev*s_dev, axis=(1,2)))
-    
+    s_dev = (sigma_average - 1/problem.dim * jnp.trace(sigma_average, axis1=1, axis2=2)[:,None,None]
+                                        * jnp.eye(problem.dim)[None,:,:])
+    vm_stress = jnp.sqrt(3./2. * jnp.sum(s_dev*s_dev, axis=(1,2)))
+
     u = sol_list[0].flatten()
-    return u, vm_stress[::100], sigma, epsilon
+    return u[::5], vm_stress[::100], sigma, epsilon
 
 
 def _mesh_config():# Specify mesh-related information (second-order tetrahedron element).
@@ -44,10 +44,10 @@ def _mesh_config():# Specify mesh-related information (second-order tetrahedron 
 
     # Define boundary locations.
     def left(point):
-        return np.isclose(point[0], 0., atol=1e-5)
+        return jnp.isclose(point[0], 0., atol=1e-5)
 
     def right(point):
-        return np.isclose(point[0], Lx, atol=1e-5)
+        return jnp.isclose(point[0], Lx, atol=1e-5)
 
 
     # Define Dirichlet boundary values.
