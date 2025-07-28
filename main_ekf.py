@@ -19,7 +19,7 @@ import logging
 logger.setLevel(logging.DEBUG)
 
 # Material properties. Example inital values
-def _init(E=40e3, nu=0.1):
+def _init(E=10e3, nu=0.0):
     return E, nu
 
 def _init_problem(E=70e3, nu=0.3):
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     x0 = jnp.array([E, nu])
     P0 = jnp.array([[1e10, 0], [0, 1e1]])
     # Process noise covariance
-    Q = jnp.array([[1e-3, 0], [0, 1e-12]])
+    Q = jnp.array([[1e10, 0], [0, 1e1]])
 
     # Measurement noise
     # The measurement noise is the uncertainty in the displacement field.
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("EKF Estimates of Material Parameters")
-    plt.savefig("plots/resultsEKF/EKF_estimate7.pdf")
+    plt.savefig("plots/resultsEKF/EKF_estimate9.pdf")
 
 
 # Calculate standard deviation and create uncertainty bands
@@ -134,4 +134,4 @@ ax[1].set_xlabel("Iteration")
 ax[1].set_ylabel("Young's Modulus [Pa]")
 
 fig.suptitle("EKF Estimates with Prediction Uncertainty ")
-plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty7.pdf")
+plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty9.pdf")

@@ -83,4 +83,4 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("NLS Estimates of Material Parameters")
-    plt.savefig("plots/NLS_estimate2.pdf")
+    plt.savefig("plots/NLS_estimate3.pdf")
