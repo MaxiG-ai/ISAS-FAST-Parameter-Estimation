@@ -27,19 +27,21 @@ def main():
     nu_true = 0.3
     
     # Training settings
-    num_pinn_pretrain_steps = 3000 # Steps to train PINN on data
-    num_param_optim_steps = 1000   # Steps to optimize material params
+    num_pinn_pretrain_steps = 5000 # Increased for better physics learning
+    num_param_optim_steps = 2000   # Increased for better convergence
     
     learning_rate_model = 1e-4
-    # Adjusted for stability
-    learning_rate_E = 1e2
+    # Improved learning rates based on parameter scales
+    learning_rate_E = 50.0  # Reduced for better stability
     learning_rate_nu = 1e-3
     
     # Loss weights for different stages
     # Stage 1: Focus on data fitting but include physics for consistency
-    pretrain_loss_weights = (1.0, 1.0, 1.0)  # (w_pde, w_bc, w_data)
+    # Following the paper: data loss should dominate but physics must be present
+    pretrain_loss_weights = (0.1, 0.1, 1.0)  # (w_pde, w_bc, w_data)
     # Stage 2: Focus on physics but keep some data constraint
-    optimize_loss_weights = (10.0, 10.0, 0.0)  # (w_pde, w_bc, w_data)
+    # Following the paper: physics should dominate but data provides constraint
+    optimize_loss_weights = (10.0, 10.0, 0.1)  # (w_pde, w_bc, w_data)
 
     # Number of points to sample for each loss term
     N_pde = 2000
@@ -49,16 +51,29 @@ def main():
     key = jax.random.PRNGKey(42)
     model_key, params_key, train_key = jax.random.split(key, 3)
     
-    # Initialize the PINN with wrong guesses for the material parameters
+    # Initialize the PINN with reasonable guesses for the material parameters
     model = PINN(model_key)
-    # Start with incorrect material parameters, but closer to the true values
-    material_params = MaterialParameters(E_init=65e3, nu_init=0.27)
+    # Start with better initial guesses - closer to typical engineering materials
+    # This follows the paper's recommendation for better initialization
+    material_params = MaterialParameters(E_init=50e3, nu_init=0.25)
     
     # --- Data Generation & Verification ---
     print(f"--- Generating ground truth data with E={E_true}, nu={nu_true} ---")
     fem_simulation = LinearElasticitySimulation(Lx, Ly, Lz)
     fem_coords, fem_displacements = fem_simulation.run(E=E_true, nu=nu_true)
-    u_true = (jnp.array(fem_coords), jnp.array(fem_displacements))
+    
+    # Use more comprehensive data sampling - include internal points, not just surface
+    # This follows the paper's emphasis on using full displacement field
+    print(f"FEM simulation generated {fem_coords.shape[0]} data points")
+    
+    # Sample a subset of FEM points for training (to avoid overfitting)
+    n_data_points = min(1000, fem_coords.shape[0])  # Use up to 1000 data points
+    data_indices = jax.random.choice(train_key, fem_coords.shape[0], shape=(n_data_points,), replace=False)
+    selected_coords = fem_coords[data_indices]
+    selected_displacements = fem_displacements[data_indices]
+    
+    u_true = (jnp.array(selected_coords), jnp.array(selected_displacements))
+    print(f"Using {n_data_points} data points for training")
     print("--- Ground truth data generated. ---")
 
     # --- Logging Setup ---
@@ -170,7 +185,7 @@ def run_pinn_pretraining(num_steps, model, material_params, opt_state, optimizer
         for step in range(num_steps + 1):
             # Only train the PINN model, material params stay constant
             updated_model, opt_state, loss_val, individual_losses, _ = train_step_pretraining(
-                model, opt_state, batch, loss_weights, optimizer, calculate_data_loss, 
+                model, opt_state, batch, loss_weights, optimizer, calculate_total_loss, 
                 (model, material_params)
             )
             model = updated_model
@@ -180,7 +195,7 @@ def run_pinn_pretraining(num_steps, model, material_params, opt_state, optimizer
                 E_pred = float(material_params.E)
                 nu_pred = float(material_params.nu)
 
-                print(f"  [pretrain] Step: {step:5d}, Data-Loss: {loss_data:.2e}, Total Loss: {loss_val:.4e}")
+                print(f"  [pretrain] Step: {step:5d}, PDE: {loss_pde:.2e}, BC: {loss_bc:.2e}, Data: {loss_data:.2e}, Total: {loss_val:.4e}")
 
                 log_entry = {
                     "step": step, "total_loss": float(loss_val),

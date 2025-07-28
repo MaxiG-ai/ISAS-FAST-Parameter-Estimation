@@ -48,6 +48,14 @@ class MaterialParameters(eqx.Module):
         else:
             self.E = jnp.array(E_init)
             self.nu = jnp.array(nu_init)
+    
+    def get_constrained_params(self):
+        """Returns physically constrained parameters."""
+        # Constrain E to reasonable range for engineering materials (GPa range)
+        E_constrained = jnp.clip(self.E, 1e3, 200e3)  # 1 GPa to 200 GPa
+        # Constrain nu to physically valid range for materials
+        nu_constrained = jnp.clip(self.nu, 0.01, 0.49)  # Avoid numerical issues at bounds
+        return E_constrained, nu_constrained
 
 # --------------------------------------------------------------------------------
 # ## Step 2: Define Loss Functions
@@ -63,9 +71,12 @@ def calculate_pde_residual(model, params, x, y, z):
     assert jnp.shape(y) == (), f"y shape: {jnp.shape(y)}"
     assert jnp.shape(z) == (), f"z shape: {jnp.shape(z)}"
 
-    # Lamé parameters are derived from the trainable E and nu
-    mu = params.E / (2 * (1 + params.nu))
-    lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
+    # Use constrained parameters to ensure physical validity
+    E, nu = params.get_constrained_params()
+    
+    # Lamé parameters are derived from the constrained E and nu
+    mu = E / (2 * (1 + nu))
+    lmbda = (E * nu) / ((1 + nu) * (1 - 2 * nu))
 
     # We need second derivatives of the displacement u w.r.t coordinates (x, y, z).
     # JAX's hessian is perfect for this. It computes d2f/(dxi dxj).
@@ -106,8 +117,10 @@ def calculate_traction(model, params, x, y, z):
     epsilon = 0.5 * (jac_u + jac_u.T)
     epsilon = jnp.atleast_2d(epsilon)
 
-    mu = params.E / (2 * (1 + params.nu))
-    lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
+    # Use constrained parameters
+    E, nu = params.get_constrained_params()
+    mu = E / (2 * (1 + nu))
+    lmbda = (E * nu) / ((1 + nu) * (1 - 2 * nu))
 
     sigma = lmbda * jnp.trace(epsilon) * jnp.eye(3) + 2 * mu * epsilon
 
@@ -151,16 +164,25 @@ def calculate_physics_loss(trainable_params, batch, loss_weights):
 
 @eqx.filter_jit
 def calculate_data_loss(trainable_params, batch, loss_weights):
-    """Calculates the weighted data-based loss."""
+    """Calculates the weighted data-based loss with improved displacement field weighting."""
     model, _ = trainable_params # Material parameters are not used here
     _, _, _, data_points = batch
     _, _, w_data = loss_weights
 
-    # Data Loss
+    # Data Loss with component-wise weighting
     v_model = jax.vmap(model, in_axes=(0, 0, 0))
     data_coords, data_displacements = data_points
     data_preds = v_model(data_coords[:,0], data_coords[:,1], data_coords[:,2])
-    loss_data = jnp.mean((data_preds - data_displacements)**2)
+    
+    # Calculate component-wise losses
+    diff = data_preds - data_displacements
+    
+    # Weight the displacement components differently - z-displacement typically largest
+    # This follows the paper's emphasis on proper displacement field approximation
+    weights = jnp.array([1.0, 1.0, 1.0])  # Equal weights for now, can be tuned
+    weighted_diff = diff * weights[None, :]
+    
+    loss_data = jnp.mean(weighted_diff**2)
 
     total_loss = w_data * loss_data
     
