@@ -33,28 +33,12 @@ This workflow separates the problem into manageable parts: first learn the shape
 
 ### Workflow Diagram
 
-```mermaid
-graph TD
-    A[Start] --> B{Stage 0: Generate Ground Truth Data};
-    B --> C{Stage 1: Pre-train PINN with Physics Constraints};
-    C --> D{Stage 2: Optimize Material Parameters};
-    D --> E[End: Predicted E, ν];
-
-    subgraph "Stage 0: FEM Simulation"
-        B1(Run FEM with E_true, ν_true) --> B2(Get Displacement Field u_fem);
-    end
-
-    subgraph "Stage 1: Learn Physics-Consistent Deformation"
-        C1(Initialize PINN & MaterialParams) -- E_guess, ν_guess --> C2(Freeze MaterialParams);
-        C2 --> C3{Train PINN Weights};
-        C3 -- "Total Loss: w_data||u_pinn - u_fem|| + w_pde*PDE + w_bc*BC<br/>Weights: (data=1.0, pde=0.1, bc=0.1)" --> C3;
-    end
-
-    subgraph "Stage 2: Fine-tune Physics"
-        D1(Freeze Pre-trained PINN) --> D2{Train MaterialParams E & ν};
-        D2 -- "Total Loss: w_pde*PDE + w_bc*BC + w_data||u_pinn - u_fem||<br/>Weights: (pde=1.0, bc=1.0, data=0.1)" --> D2;
-    end
-```
+| Stage | Description | Actions | Loss Components & Weights |
+|-------|-------------|---------|---------------------------|
+| **Stage 0** | Generate Ground Truth Data | Run FEM with `E_true`, `ν_true` to get displacement field `u_fem` | N/A |
+| **Stage 1** | Pre-train PINN with Physics Constraints | Initialize PINN & MaterialParams (`E_guess`, `ν_guess`)<br>Freeze MaterialParams<br>Train PINN weights | `w_data = 1.0` (||u_pinn - u_fem||)<br>`w_pde = 0.1` (PDE)<br>`w_bc = 0.1` (BC) |
+| **Stage 2** | Optimize Material Parameters | Freeze pre-trained PINN<br>Train MaterialParams (`E`, `ν`) | `w_pde = 1.0` (PDE)<br>`w_bc = 1.0` (BC)<br>`w_data = 0` (||u_pinn - u_fem||) |
+| **End** | Predicted `E`, `ν` | Output optimized material parameters | N/A |
 
 ## 4. Detailed Workflow Breakdown
 
@@ -101,17 +85,3 @@ The entire process is orchestrated by the `pinn/iterative_trainer.py` script.
     ```
 
 4. The script will print its progress for each stage. Final results, logs, and plots will be saved to a new, timestamped directory in `pinn/results/`.
-
-## 6. Key Insight: Why Both Stages Need All Loss Components
-
-The critical insight in this implementation is that **both training stages use all three loss components** (data, PDE, and boundary conditions) but with different relative weights:
-
-- **Stage 1 Priority**: Learn accurate deformation field (`w_data = 1.0`) while respecting physics (`w_pde = w_bc = 0.1`)
-- **Stage 2 Priority**: Satisfy governing equations (`w_pde = w_bc = 1.0`) while maintaining data consistency (`w_data = 0.1`)
-
-This approach ensures:
-1. **Stage 1** produces a physics-aware approximation, not just a data-fitting curve
-2. **Stage 2** can successfully optimize material parameters because the PINN already represents a physically plausible solution
-3. **Stability** throughout the optimization process by maintaining connections to both experimental data and physical laws
-
-The alternative approach (Stage 1 with data-only loss, Stage 2 with physics-only loss) often fails because the pre-trained PINN may represent a deformation field that cannot be achieved with any reasonable material parameters, making Stage 2 optimization impossible or unstable.

@@ -1,5 +1,3 @@
-# main_pinn.py
-#
 # A complete script to train a Physics-Informed Neural Network (PINN)
 # for the inverse problem of identifying material parameters (Young's Modulus E and Poisson's Ratio v)
 # from displacement data of a linear elastic beam.
@@ -16,8 +14,6 @@ key = jax.random.PRNGKey(42)
 # --------------------------------------------------------------------------------
 # ## Step 1: Define Model Architecture
 # --------------------------------------------------------------------------------
-# The PINN model is a simple MLP that maps spatial coordinates (x, y, z)
-# to a displacement vector (ux, uy, uz).
 
 class PINN(eqx.Module):
     mlp: eqx.nn.MLP
@@ -32,16 +28,13 @@ class PINN(eqx.Module):
         in_vec = jnp.array([x, y, z])
         return self.mlp(in_vec)
 
-# The material parameters E and nu are also defined as a trainable Equinox module.
-# This allows JAX to compute gradients with respect to them automatically.
 class MaterialParameters(eqx.Module):
     E: jnp.ndarray
     nu: jnp.ndarray
 
     def __init__(self, E_init, nu_init):
         """Initializes with starting guesses for E and nu, or with string labels."""
-        # This allows the class to be used for both training (with numbers)
-        # and for setting up the optimizer labels (with strings).
+        # This allows the class to be used for both training + for setting up the optimizer labels.
         if isinstance(E_init, str):
             self.E = E_init
             self.nu = nu_init
@@ -52,13 +45,11 @@ class MaterialParameters(eqx.Module):
 # --------------------------------------------------------------------------------
 # ## Step 2: Define Loss Functions
 # --------------------------------------------------------------------------------
-# The total loss is a combination of physics loss (PDE residual),
-# boundary condition loss, and data mismatch loss.
 
 def calculate_pde_residual(model, params, x, y, z):
     """Calculates the Navier-Cauchy equation residual for a single point."""
     
-    # Defensive: ensure x, y, z are scalars (not arrays)
+    # ensure x, y, z are scalars (not arrays)
     assert jnp.shape(x) == (), f"x shape: {jnp.shape(x)}"
     assert jnp.shape(y) == (), f"y shape: {jnp.shape(y)}"
     assert jnp.shape(z) == (), f"z shape: {jnp.shape(z)}"
@@ -67,9 +58,6 @@ def calculate_pde_residual(model, params, x, y, z):
     mu = params.E / (2 * (1 + params.nu))
     lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
 
-    # We need second derivatives of the displacement u w.r.t coordinates (x, y, z).
-    # JAX's hessian is perfect for this. It computes d2f/(dxi dxj).
-    # We apply it to each component of the displacement vector u = [u0, u1, u2].
     u = lambda x, y, z: model(x, y, z)
 
     hessian_u0 = jax.hessian(lambda x, y, z: u(x, y, z)[0])(x, y, z)
@@ -212,6 +200,8 @@ def calculate_total_loss(trainable_params, batch, loss_weights):
 # ## Step 3: Training Setup
 # --------------------------------------------------------------------------------
 
+
+# TODO: merge to one function
 @eqx.filter_jit
 def train_step_pretraining(model, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params):
     """Performs a single training step for PINN pretraining (only model parameters updated)."""

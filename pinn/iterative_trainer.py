@@ -1,18 +1,19 @@
+import os
+import sys
+import csv
+from datetime import datetime
+import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import optax
-import csv
-from datetime import datetime
-import os
-import matplotlib.pyplot as plt
-import sys
 
-# Add the project root to the Python path to allow for absolute imports
+# Project root imports allowed
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import from our project
-from pinn.model import PINN, MaterialParameters, calculate_total_loss
+from pinn.model import PINN, MaterialParameters, calculate_total_loss, train_step_optimization
+
 from LinearElasticity.simulation import LinearElasticitySimulation
 
 def main():
@@ -52,6 +53,7 @@ def main():
     # Initialize the PINN with wrong guesses for the material parameters
     model = PINN(model_key)
     # Start with incorrect material parameters, but closer to the true values
+    # This appears to cause an issue
     material_params = MaterialParameters(E_init=65e3, nu_init=0.27)
     
     # --- Data Generation & Verification ---
@@ -61,7 +63,7 @@ def main():
     u_true = (jnp.array(fem_coords), jnp.array(fem_displacements))
     print("--- Ground truth data generated. ---")
 
-    # --- Logging Setup ---
+    # --- Logging ---
     now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = f"pinn/results/{now_str}-iterative-run"
     os.makedirs(log_dir, exist_ok=True)
@@ -76,7 +78,7 @@ def main():
     # --- STAGE 1: PINN Pre-training (fitting to data) ---
     print("\n--- Stage 1: Pre-training PINN on FEM data ---")
 
-    # Optimizer for the PINN model ONLY
+    # Optimizer for the PINN model
     pinn_params, _ = eqx.partition(model, eqx.is_array)
     optimizer_model = optax.adam(learning_rate_model)
     opt_state_model = optimizer_model.init(pinn_params)
@@ -200,9 +202,7 @@ def run_material_optimization(num_steps, static_model, material_params, opt_stat
     """
     Optimize material parameters using the pre-trained (frozen) PINN model.
     Only material parameters are updated, the PINN model stays frozen.
-    """
-    from pinn.model import calculate_total_loss, train_step_optimization
-    
+    """    
     csv_filename = f"{log_dir}/optimize_log.csv"
     csv_fields = ["step", "total_loss", "loss_pde", "loss_bc", "loss_data", "E_pred", "nu_pred"]
     history = {field: [] for field in csv_fields}
@@ -214,7 +214,12 @@ def run_material_optimization(num_steps, static_model, material_params, opt_stat
         for step in range(num_steps + 1):
             # Only train material parameters, PINN model is frozen
             updated_material_params, opt_state, loss_val, individual_losses, _ = train_step_optimization(
-                material_params, opt_state, batch, loss_weights, optimizer, calculate_total_loss,
+                material_params, 
+                opt_state, 
+                batch, 
+                loss_weights, 
+                optimizer, 
+                calculate_total_loss,
                 (static_model, material_params)
             )
             material_params = updated_material_params
@@ -224,7 +229,7 @@ def run_material_optimization(num_steps, static_model, material_params, opt_stat
                 E_pred = float(material_params.E)
                 nu_pred = float(material_params.nu)
 
-                print(f"  [optimize] Step: {step:5d}, PDE-Loss: {loss_pde:.2e}, BC-Loss: {loss_bc:.2e}, Data-Loss: {loss_data:.2e}, Total Loss: {loss_val:.4e}, E: {E_pred:.2f}, nu: {nu_pred:.4f}")
+                print(f"[optimize] Step: {step:5d}, PDE-Loss: {loss_pde:.2e}, BC-Loss: {loss_bc:.2e}, Data-Loss: {loss_data:.2e}, Total Loss: {loss_val:.4e}, E: {E_pred:.2f}, nu: {nu_pred:.4f}")
 
                 log_entry = {
                     "step": step, "total_loss": float(loss_val),
@@ -300,5 +305,6 @@ def plot_pretraining_progress(history, save_dir, true_params=None, phase="pretra
     plt.savefig(os.path.join(save_dir, fname), dpi=150)
     plt.close()
 
+# run the main function
 if __name__ == '__main__':
     main()
