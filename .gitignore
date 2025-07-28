@@ -1,4 +1,5 @@
 .DS_Store
+pinn/__pycache__/
 
 # ignore devcontainer settings
 .devcontainer

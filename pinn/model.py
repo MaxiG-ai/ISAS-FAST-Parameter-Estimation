@@ -1,5 +1,3 @@
-# main_pinn.py
-#
 # A complete script to train a Physics-Informed Neural Network (PINN)
 # for the inverse problem of identifying material parameters (Young's Modulus E and Poisson's Ratio v)
 # from displacement data of a linear elastic beam.
@@ -8,13 +6,7 @@
 
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import equinox as eqx
-import optax
-import time
-import csv
-from datetime import datetime
-import os
 
 # For reproducibility
 key = jax.random.PRNGKey(42)
@@ -22,8 +14,6 @@ key = jax.random.PRNGKey(42)
 # --------------------------------------------------------------------------------
 # ## Step 1: Define Model Architecture
 # --------------------------------------------------------------------------------
-# The PINN model is a simple MLP that maps spatial coordinates (x, y, z)
-# to a displacement vector (ux, uy, uz).
 
 class PINN(eqx.Module):
     mlp: eqx.nn.MLP
@@ -38,16 +28,13 @@ class PINN(eqx.Module):
         in_vec = jnp.array([x, y, z])
         return self.mlp(in_vec)
 
-# The material parameters E and nu are also defined as a trainable Equinox module.
-# This allows JAX to compute gradients with respect to them automatically.
 class MaterialParameters(eqx.Module):
     E: jnp.ndarray
     nu: jnp.ndarray
 
     def __init__(self, E_init, nu_init):
         """Initializes with starting guesses for E and nu, or with string labels."""
-        # This allows the class to be used for both training (with numbers)
-        # and for setting up the optimizer labels (with strings).
+        # This allows the class to be used for both training + for setting up the optimizer labels.
         if isinstance(E_init, str):
             self.E = E_init
             self.nu = nu_init
@@ -58,13 +45,11 @@ class MaterialParameters(eqx.Module):
 # --------------------------------------------------------------------------------
 # ## Step 2: Define Loss Functions
 # --------------------------------------------------------------------------------
-# The total loss is a combination of physics loss (PDE residual),
-# boundary condition loss, and data mismatch loss.
 
 def calculate_pde_residual(model, params, x, y, z):
     """Calculates the Navier-Cauchy equation residual for a single point."""
     
-    # Defensive: ensure x, y, z are scalars (not arrays)
+    # ensure x, y, z are scalars (not arrays)
     assert jnp.shape(x) == (), f"x shape: {jnp.shape(x)}"
     assert jnp.shape(y) == (), f"y shape: {jnp.shape(y)}"
     assert jnp.shape(z) == (), f"z shape: {jnp.shape(z)}"
@@ -73,9 +58,6 @@ def calculate_pde_residual(model, params, x, y, z):
     mu = params.E / (2 * (1 + params.nu))
     lmbda = (params.E * params.nu) / ((1 + params.nu) * (1 - 2 * params.nu))
 
-    # We need second derivatives of the displacement u w.r.t coordinates (x, y, z).
-    # JAX's hessian is perfect for this. It computes d2f/(dxi dxj).
-    # We apply it to each component of the displacement vector u = [u0, u1, u2].
     u = lambda x, y, z: model(x, y, z)
 
     hessian_u0 = jax.hessian(lambda x, y, z: u(x, y, z)[0])(x, y, z)
@@ -124,6 +106,56 @@ def calculate_traction(model, params, x, y, z):
 
 
 @eqx.filter_jit
+def calculate_physics_loss(trainable_params, batch, loss_weights):
+    """Calculates the weighted physics-based loss (PDE and BCs)."""
+    model, material_params = trainable_params
+    pde_points, dirichlet_points, neumann_points, _ = batch
+    w_pde, w_bc, _ = loss_weights
+
+    # 1. PDE Loss
+    v_pde_res = jax.vmap(calculate_pde_residual, in_axes=(None, None, 0, 0, 0))
+    pde_residuals = v_pde_res(model, material_params, pde_points[:,0], pde_points[:,1], pde_points[:,2])
+    loss_pde = jnp.mean(pde_residuals**2)
+
+    # 2. Boundary Condition Loss
+    v_model = jax.vmap(model, in_axes=(0, 0, 0))
+    
+    # Dirichlet BC
+    dirichlet_preds = v_model(dirichlet_points[:,0], dirichlet_points[:,1], dirichlet_points[:,2])
+    loss_dirichlet = jnp.mean(dirichlet_preds**2)
+    
+    # Neumann BC
+    v_traction = jax.vmap(calculate_traction, in_axes=(None, None, 0, 0, 0))
+    traction_preds = v_traction(model, material_params, neumann_points[:,0], neumann_points[:,1], neumann_points[:,2])
+    traction_target = jnp.array([0., 0., 100.])
+    loss_neumann = jnp.mean((traction_preds - traction_target)**2)
+    
+    loss_bc = loss_dirichlet + loss_neumann
+    
+    total_loss = w_pde * loss_pde + w_bc * loss_bc
+    
+    return total_loss, (loss_pde, loss_bc, jnp.array(0.))
+
+
+@eqx.filter_jit
+def calculate_data_loss(trainable_params, batch, loss_weights):
+    """Calculates the weighted data-based loss."""
+    model, _ = trainable_params # Material parameters are not used here
+    _, _, _, data_points = batch
+    _, _, w_data = loss_weights
+
+    # Data Loss
+    v_model = jax.vmap(model, in_axes=(0, 0, 0))
+    data_coords, data_displacements = data_points
+    data_preds = v_model(data_coords[:,0], data_coords[:,1], data_coords[:,2])
+    loss_data = jnp.mean((data_preds - data_displacements)**2)
+
+    total_loss = w_data * loss_data
+    
+    return total_loss, (jnp.array(0.), jnp.array(0.), loss_data)
+
+
+@eqx.filter_jit
 def calculate_total_loss(trainable_params, batch, loss_weights):
     """Calculates the weighted total loss."""
     model, material_params = trainable_params
@@ -168,21 +200,41 @@ def calculate_total_loss(trainable_params, batch, loss_weights):
 # ## Step 3: Training Setup
 # --------------------------------------------------------------------------------
 
-@eqx.filter_jit
-def train_step(trainable_params, opt_state, batch, loss_weights, optimizer):
-    """Performs a single training step."""
-    
-    # The loss function needs to be wrapped to only return the total loss for grad
-    def loss_fn(params):
-        total_loss, _ = calculate_total_loss(params, batch, loss_weights)
-        return total_loss
 
-    # Get loss value and gradients
+# TODO: merge to one function
+@eqx.filter_jit
+def train_step_pretraining(model, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params):
+    """Performs a single training step for PINN pretraining (only model parameters updated)."""
+    
+    # Get loss value and gradients w.r.t. the loss parameters
     (loss_val, individual_losses), grads = eqx.filter_value_and_grad(
-        calculate_total_loss, has_aux=True
-    )(trainable_params, batch, loss_weights)
+        loss_fn, has_aux=True
+    )(loss_params, batch, loss_weights)
     
-    updates, opt_state = optimizer.update(grads, opt_state, trainable_params)
-    trainable_params = eqx.apply_updates(trainable_params, updates)
+    # For pretraining, we only need gradients w.r.t. the model
+    # Since loss_params = (model, material_params), grads[0] are the model gradients
+    model_grads = grads[0]
     
-    return trainable_params, opt_state, loss_val, individual_losses, grads
+    updates, opt_state = optimizer.update(model_grads, opt_state, model)
+    model = eqx.apply_updates(model, updates)
+    
+    return model, opt_state, loss_val, individual_losses, grads
+
+
+@eqx.filter_jit  
+def train_step_optimization(material_params, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params):
+    """Performs a single training step for material parameter optimization (only material params updated)."""
+    
+    # Get loss value and gradients w.r.t. the loss parameters
+    (loss_val, individual_losses), grads = eqx.filter_value_and_grad(
+        loss_fn, has_aux=True
+    )(loss_params, batch, loss_weights)
+    
+    # For optimization, we only need gradients w.r.t. the material parameters
+    # Since loss_params = (static_model, material_params), grads[1] are the material param gradients
+    param_grads = grads[1]
+    
+    updates, opt_state = optimizer.update(param_grads, opt_state, material_params)
+    material_params = eqx.apply_updates(material_params, updates)
+    
+    return material_params, opt_state, loss_val, individual_losses, grads
