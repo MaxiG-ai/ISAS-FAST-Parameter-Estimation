@@ -35,18 +35,27 @@ if __name__ == "__main__":
                             ele_type=ele_type,
                             dirichlet_bc_info=dirichlet_bc_info,
                             location_fns=location_fns)
+    # Set material parameters.
     E, nu = _init()
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))  
     x0 = jnp.array([E, nu])
     P0 = jnp.array([[1e10, 0], [0, 1e1]])
-    Q = jnp.array([[1e10, 0], [0, 1e1]])
+    # Process noise covariance
+    Q = jnp.array([[1e-3, 0], [0, 1e-12]])
 
+    # Measurement noise
+    # The measurement noise is the uncertainty in the displacement field.
+    # The displacement field is a vector of length 3703, so we create a diagonal
+    # matrix with the same length.
+    # Small covariance since we trust the simulation.
     disp_var = 1e-3
     stress_var = 1e3 
     R = jnp.diag(jnp.asarray([disp_var] * 3703))
+    # Create an instance of the Extended Kalman Filter.
     ekf = LinearElasticityEKF(Q=Q, R=R, x0=x0, P0=P0)
 
+    # Set the initial state and covariance.
     estimated_states = [_init()]
     measured_states = []
     covariance_states = [P0]
@@ -93,7 +102,7 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("EKF Estimates of Material Parameters")
-    plt.savefig("plots/resultsEKF/EKF_estimate4.pdf")
+    plt.savefig("plots/resultsEKF/EKF_estimate7.pdf")
 
 
 # Calculate standard deviation and create uncertainty bands
@@ -125,4 +134,4 @@ ax[1].set_xlabel("Iteration")
 ax[1].set_ylabel("Young's Modulus [Pa]")
 
 fig.suptitle("EKF Estimates with Prediction Uncertainty ")
-plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty4.pdf")
+plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty7.pdf")
