@@ -19,7 +19,7 @@ import logging
 logger.setLevel(logging.DEBUG)
 
 # Material properties. Example inital values
-def _init(E=50e3, nu=0.1):
+def _init(E=40e3, nu=0.1):
     return E, nu
 
 def _init_problem(E=70e3, nu=0.3):
@@ -42,8 +42,8 @@ if __name__ == "__main__":
     P0 = jnp.array([[1e10, 0], [0, 1e1]])
     Q = jnp.array([[1e10, 0], [0, 1e1]])
 
-    disp_var = 10
-    stress_var = 1e3
+    disp_var = 1e-3
+    stress_var = 1e3 
     R = jnp.diag(jnp.asarray([disp_var] * 3703))
     ekf = LinearElasticityEKF(Q=Q, R=R, x0=x0, P0=P0)
 
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("EKF Estimates of Material Parameters")
-    plt.savefig("plots/resultsEKF/EKF_estimate1.pdf")
+    plt.savefig("plots/resultsEKF/EKF_estimate4.pdf")
 
 
 # Calculate standard deviation and create uncertainty bands
@@ -125,4 +125,4 @@ ax[1].set_xlabel("Iteration")
 ax[1].set_ylabel("Young's Modulus [Pa]")
 
 fig.suptitle("EKF Estimates with Prediction Uncertainty ")
-plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty1.pdf")
+plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty4.pdf")
