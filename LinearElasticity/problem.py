@@ -3,6 +3,9 @@ from jax_fem.problem import Problem
 
 # Weak forms.
 class LinearElasticity(Problem):
+    def set_params(self, params):
+        E, nu = float(params[0]), float(params[1])
+        self.set_material_parameters(E, nu)
     def set_material_parameters(self, E, nu):
         self.E = E
         self.nu = nu
