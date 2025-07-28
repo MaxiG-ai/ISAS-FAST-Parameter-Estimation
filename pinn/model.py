@@ -213,22 +213,38 @@ def calculate_total_loss(trainable_params, batch, loss_weights):
 # --------------------------------------------------------------------------------
 
 @eqx.filter_jit
-def train_step(trainable_params, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params, stage_name):
-    """Performs a single training step."""
-
-    # Get loss value and gradients w.r.t. the full set of loss parameters
+def train_step_pretraining(model, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params):
+    """Performs a single training step for PINN pretraining (only model parameters updated)."""
+    
+    # Get loss value and gradients w.r.t. the loss parameters
     (loss_val, individual_losses), grads = eqx.filter_value_and_grad(
         loss_fn, has_aux=True
     )(loss_params, batch, loss_weights)
     
-    # In the optimization stage, the gradients are a tuple (grads_for_model, grads_for_params).
-    # We only need the second part for the optimizer.
-    if stage_name == "optimize":
-        grads_to_apply = grads[1]
-    else:
-        grads_to_apply = grads
-
-    updates, opt_state = optimizer.update(grads_to_apply, opt_state, trainable_params)
-    trainable_params = eqx.apply_updates(trainable_params, updates)
+    # For pretraining, we only need gradients w.r.t. the model
+    # Since loss_params = (model, material_params), grads[0] are the model gradients
+    model_grads = grads[0]
     
-    return trainable_params, opt_state, loss_val, individual_losses, grads
+    updates, opt_state = optimizer.update(model_grads, opt_state, model)
+    model = eqx.apply_updates(model, updates)
+    
+    return model, opt_state, loss_val, individual_losses, grads
+
+
+@eqx.filter_jit  
+def train_step_optimization(material_params, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params):
+    """Performs a single training step for material parameter optimization (only material params updated)."""
+    
+    # Get loss value and gradients w.r.t. the loss parameters
+    (loss_val, individual_losses), grads = eqx.filter_value_and_grad(
+        loss_fn, has_aux=True
+    )(loss_params, batch, loss_weights)
+    
+    # For optimization, we only need gradients w.r.t. the material parameters
+    # Since loss_params = (static_model, material_params), grads[1] are the material param gradients
+    param_grads = grads[1]
+    
+    updates, opt_state = optimizer.update(param_grads, opt_state, material_params)
+    material_params = eqx.apply_updates(material_params, updates)
+    
+    return material_params, opt_state, loss_val, individual_losses, grads

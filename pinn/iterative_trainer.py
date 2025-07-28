@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import from our project
-from pinn.model import PINN, MaterialParameters, train_step, calculate_total_loss
+from pinn.model import PINN, MaterialParameters, calculate_total_loss
 from LinearElasticity.simulation import LinearElasticitySimulation
 
 def main():
@@ -27,19 +27,19 @@ def main():
     nu_true = 0.3
     
     # Training settings
-    num_pinn_pretrain_steps = 10000 # Steps to train PINN on data
-    num_param_optim_steps = 3000   # Steps to optimize material params
+    num_pinn_pretrain_steps = 3000 # Steps to train PINN on data
+    num_param_optim_steps = 1000   # Steps to optimize material params
     
     learning_rate_model = 1e-4
     # Adjusted for stability
-    learning_rate_E = 5e1 
-    learning_rate_nu = 5e-4
+    learning_rate_E = 1e2
+    learning_rate_nu = 1e-3
     
     # Loss weights for different stages
     # Stage 1: Focus on data fitting but include physics for consistency
-    pretrain_loss_weights = (0.1, 0.1, 1.0)  # (w_pde, w_bc, w_data)
+    pretrain_loss_weights = (1.0, 1.0, 1.0)  # (w_pde, w_bc, w_data)
     # Stage 2: Focus on physics but keep some data constraint
-    optimize_loss_weights = (1.0, 1.0, 0.1)  # (w_pde, w_bc, w_data)
+    optimize_loss_weights = (10.0, 10.0, 0.0)  # (w_pde, w_bc, w_data)
 
     # Number of points to sample for each loss term
     N_pde = 2000
@@ -52,13 +52,13 @@ def main():
     # Initialize the PINN with wrong guesses for the material parameters
     model = PINN(model_key)
     # Start with incorrect material parameters, but closer to the true values
-    material_params = MaterialParameters(E_init=50e3, nu_init=0.2)
+    material_params = MaterialParameters(E_init=65e3, nu_init=0.27)
     
     # --- Data Generation & Verification ---
     print(f"--- Generating ground truth data with E={E_true}, nu={nu_true} ---")
     fem_simulation = LinearElasticitySimulation(Lx, Ly, Lz)
     fem_coords, fem_displacements = fem_simulation.run(E=E_true, nu=nu_true)
-    data_points = (jnp.array(fem_coords), jnp.array(fem_displacements))
+    u_true = (jnp.array(fem_coords), jnp.array(fem_displacements))
     print("--- Ground truth data generated. ---")
 
     # --- Logging Setup ---
@@ -66,26 +66,30 @@ def main():
     log_dir = f"pinn/results/{now_str}-iterative-run"
     os.makedirs(log_dir, exist_ok=True)
     
+    # --- Sample all collocation and boundary points ONCE ---
+    pde_points = jax.random.uniform(train_key, shape=(N_pde, 3)) * jnp.array([Lx, Ly, Lz])
+    dirichlet_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([0., Ly, Lz])
+    neumann_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([Lx, Ly, Lz])
+    neumann_points = neumann_points.at[:, 0].set(Lx)
+    batch = (pde_points, dirichlet_points, neumann_points, u_true)
+
     # --- STAGE 1: PINN Pre-training (fitting to data) ---
     print("\n--- Stage 1: Pre-training PINN on FEM data ---")
-    
+
     # Optimizer for the PINN model ONLY
-    pinn_params, _ = eqx.partition((model, material_params), eqx.is_array)
+    pinn_params, _ = eqx.partition(model, eqx.is_array)
     optimizer_model = optax.adam(learning_rate_model)
     opt_state_model = optimizer_model.init(pinn_params)
-    
-    history_pretrain = run_training_stage(
-        "pretrain",
+
+    history_pretrain = run_pinn_pretraining(
         num_pinn_pretrain_steps,
-        (model, material_params),
+        model,
+        material_params,
         opt_state_model,
         optimizer_model,
-        calculate_total_loss,  # Changed from calculate_data_loss
-        data_points,
-        pretrain_loss_weights,  # Use pretrain-specific weights
-        (Lx, Ly, Lz, N_pde, N_bc),
-        train_key,
-        log_dir
+        batch,
+        pretrain_loss_weights,
+        log_dir=log_dir
     )
     
     # The model is now pre-trained
@@ -93,14 +97,8 @@ def main():
     
     # --- Verification after Pre-training ---
     print("\n--- Verifying Pre-trained PINN with All Loss Components ---")
-    pde_points = jax.random.uniform(train_key, shape=(N_pde, 3)) * jnp.array([Lx, Ly, Lz])
-    dirichlet_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([0., Ly, Lz])
-    neumann_points = jax.random.uniform(train_key, shape=(N_bc, 3)) * jnp.array([Lx, Ly, Lz])
-    neumann_points = neumann_points.at[:, 0].set(Lx)
-    verification_batch = (pde_points, dirichlet_points, neumann_points, data_points)
-
     total_loss_val, (pde_loss, bc_loss, data_loss) = calculate_total_loss(
-        (model, material_params), verification_batch, (1., 1., 1.)
+        (model, material_params), batch, (1., 1., 1.)
     )
     print(f"  Total Loss after pre-training: {total_loss_val:.2e}")
     print(f"  Individual losses - PDE: {pde_loss:.2e}, BC: {bc_loss:.2e}, Data: {data_loss:.2e}")
@@ -130,19 +128,15 @@ def main():
     # Initialize the optimizer state with only the material parameters
     opt_state_params = optimizer_params.init(eqx.filter(material_params, eqx.is_array))
 
-    history_optimize = run_training_stage(
-        "optimize",
+    history_optimize = run_material_optimization(
         num_param_optim_steps,
-        material_params, # Pass only the trainable material parameters
+        static_model,
+        material_params,
         opt_state_params,
         optimizer_params,
-        calculate_total_loss,  # Changed from calculate_physics_loss
-        data_points,
-        optimize_loss_weights,  # Use optimize-specific weights
-        (Lx, Ly, Lz, N_pde, N_bc),
-        train_key,
-        log_dir,
-        static_model=static_model # Pass the frozen PINN model separately
+        batch,
+        optimize_loss_weights,
+        log_dir=log_dir
     )
 
     final_params = history_optimize['final_params']
@@ -155,20 +149,18 @@ def main():
     print(f"Logs and plots saved to: {log_dir}")
 
     # --- Plotting ---
-    plot_optimization_progress(history_optimize, log_dir, (E_true, nu_true))
+    plot_pretraining_progress(history_optimize, log_dir, true_params=(E_true, nu_true), phase="optimize")
 
 
-def run_training_stage(stage_name, num_steps, trainable_params, opt_state, optimizer, loss_fn, data_points, loss_weights, sim_dims, key, log_dir, static_model=None):
-    """Generic function to run a training stage."""
+def run_pinn_pretraining(num_steps, model, material_params, opt_state, optimizer, batch, loss_weights, log_dir):
+    """
+    Pre-train the PINN model on data only.
+    Material parameters are kept constant and not used in the loss.
+    """
+    from pinn.model import calculate_data_loss, train_step_pretraining
     
-    Lx, Ly, Lz, N_pde, N_bc = sim_dims
-    
-    # This is the part of the model that gets updated.
-    params_to_train, static_part_of_trainable = eqx.partition(trainable_params, eqx.is_array)
-
-    csv_filename = f"{log_dir}/{stage_name}_log.csv"
+    csv_filename = f"{log_dir}/pretrain_log.csv"
     csv_fields = ["step", "total_loss", "loss_pde", "loss_bc", "loss_data", "E_pred", "nu_pred"]
-    
     history = {field: [] for field in csv_fields}
 
     with open(csv_filename, 'w', newline='') as f:
@@ -176,52 +168,19 @@ def run_training_stage(stage_name, num_steps, trainable_params, opt_state, optim
         writer.writeheader()
 
         for step in range(num_steps + 1):
-            key, iter_key = jax.random.split(key)
-            pde_key, dir_key, neu_key = jax.random.split(iter_key, 3)
-            
-            pde_points = jax.random.uniform(pde_key, shape=(N_pde, 3)) * jnp.array([Lx, Ly, Lz])
-            dirichlet_points = jax.random.uniform(dir_key, shape=(N_bc, 3)) * jnp.array([0., Ly, Lz])
-            neumann_points = jax.random.uniform(neu_key, shape=(N_bc, 3)) * jnp.array([Lx, Ly, Lz])
-            neumann_points = neumann_points.at[:, 0].set(Lx)
-            
-            batch = (pde_points, dirichlet_points, neumann_points, data_points)
-
-            # Reconstruct the full set of parameters for the loss function
-            if stage_name == "optimize":
-                # For optimization, combine the static PINN with the current material params
-                current_material_params = eqx.combine(params_to_train, static_part_of_trainable)
-                loss_params = (static_model, current_material_params)
-                step_params = current_material_params
-            else:
-                # For pre-training, the whole model is trainable
-                loss_params = eqx.combine(params_to_train, static_part_of_trainable)
-                step_params = loss_params
-
-            # Perform one training step
-            updated_params, opt_state, loss_val, individual_losses, _ = train_step(
-                step_params, opt_state, batch, loss_weights, optimizer, loss_fn, loss_params, stage_name
+            # Only train the PINN model, material params stay constant
+            updated_model, opt_state, loss_val, individual_losses, _ = train_step_pretraining(
+                model, opt_state, batch, loss_weights, optimizer, calculate_data_loss, 
+                (model, material_params)
             )
-            params_to_train, _ = eqx.partition(updated_params, eqx.is_array)
+            model = updated_model
 
-
-            if step % 500 == 0:
-                # Recombine to get the full model/params for logging
-                if stage_name == "optimize":
-                    logged_material_params = eqx.combine(params_to_train, static_part_of_trainable)
-                    full_params_for_log = (static_model, logged_material_params)
-                else:
-                    full_params_for_log = eqx.combine(params_to_train, static_part_of_trainable)
-                
-                model, material_params = full_params_for_log
-
+            if step % 200 == 0:
                 loss_pde, loss_bc, loss_data = individual_losses
                 E_pred = float(material_params.E)
                 nu_pred = float(material_params.nu)
-                
-                if stage_name == "pretrain":
-                    print(f"  [{stage_name}] Step: {step:5d}, Loss: {loss_val:.4e}")
-                else:
-                    print(f"  [{stage_name}] Step: {step:5d}, Loss: {loss_val:.4e}, E: {E_pred:.2f}, nu: {nu_pred:.4f}")
+
+                print(f"  [pretrain] Step: {step:5d}, Data-Loss: {loss_data:.2e}, Total Loss: {loss_val:.4e}")
 
                 log_entry = {
                     "step": step, "total_loss": float(loss_val),
@@ -231,88 +190,115 @@ def run_training_stage(stage_name, num_steps, trainable_params, opt_state, optim
                 writer.writerow(log_entry)
                 for h_key, val in log_entry.items():
                     history[h_key].append(val)
-    
-    # Reconstruct final model/params
-    final_trainable_part = eqx.combine(params_to_train, static_part_of_trainable)
-    if stage_name == "optimize":
-        history['final_model'] = static_model
-        history['final_params'] = final_trainable_part
-    else:
-        final_model, final_params = final_trainable_part
-        history['final_model'] = final_model
-        history['final_params'] = final_params
-    
+
+    history['final_model'] = model
+    history['final_params'] = material_params
     return history
 
 
-def plot_pretraining_progress(history, save_dir):
-    """Plots the pre-training history showing all loss components."""
-    plt.figure(figsize=(12, 8))
+def run_material_optimization(num_steps, static_model, material_params, opt_state, optimizer, batch, loss_weights, log_dir):
+    """
+    Optimize material parameters using the pre-trained (frozen) PINN model.
+    Only material parameters are updated, the PINN model stays frozen.
+    """
+    from pinn.model import calculate_total_loss, train_step_optimization
     
-    # Plot all loss components
+    csv_filename = f"{log_dir}/optimize_log.csv"
+    csv_fields = ["step", "total_loss", "loss_pde", "loss_bc", "loss_data", "E_pred", "nu_pred"]
+    history = {field: [] for field in csv_fields}
+
+    with open(csv_filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=csv_fields)
+        writer.writeheader()
+
+        for step in range(num_steps + 1):
+            # Only train material parameters, PINN model is frozen
+            updated_material_params, opt_state, loss_val, individual_losses, _ = train_step_optimization(
+                material_params, opt_state, batch, loss_weights, optimizer, calculate_total_loss,
+                (static_model, material_params)
+            )
+            material_params = updated_material_params
+
+            if step % 200 == 0:
+                loss_pde, loss_bc, loss_data = individual_losses
+                E_pred = float(material_params.E)
+                nu_pred = float(material_params.nu)
+
+                print(f"  [optimize] Step: {step:5d}, PDE-Loss: {loss_pde:.2e}, BC-Loss: {loss_bc:.2e}, Data-Loss: {loss_data:.2e}, Total Loss: {loss_val:.4e}, E: {E_pred:.2f}, nu: {nu_pred:.4f}")
+
+                log_entry = {
+                    "step": step, "total_loss": float(loss_val),
+                    "loss_pde": float(loss_pde), "loss_bc": float(loss_bc), "loss_data": float(loss_data),
+                    "E_pred": E_pred, "nu_pred": nu_pred
+                }
+                writer.writerow(log_entry)
+                for h_key, val in log_entry.items():
+                    history[h_key].append(val)
+
+    history['final_model'] = static_model
+    history['final_params'] = material_params
+    return history
+
+
+def plot_pretraining_progress(history, save_dir, true_params=None, phase="pretrain"):
+    """
+    Plots the training/optimization history showing all loss components and material parameters.
+    If true_params is provided, overlays true E and nu values.
+    """
+
+    plt.figure(figsize=(12, 8))
+
+    # First subplot: Loss components
     plt.subplot(2, 1, 1)
     plt.plot(history['step'], history['total_loss'], label='Total Loss', color='black', linewidth=2)
     plt.plot(history['step'], history['loss_data'], label='Data Loss (weighted)', color='green', linestyle='--')
     plt.plot(history['step'], history['loss_pde'], label='PDE Loss (weighted)', color='blue', linestyle='--')
     plt.plot(history['step'], history['loss_bc'], label='BC Loss (weighted)', color='red', linestyle='--')
     plt.yscale('log')
-    plt.title('Stage 1: PINN Pre-training with Physics Constraints')
+    if phase == "pretrain":
+        plt.title('Stage 1: PINN Pre-training with Physics Constraints')
+    else:
+        plt.title('Stage 2: Material Parameter Optimization')
     plt.xlabel('Training Step')
     plt.ylabel('Loss (log scale)')
     plt.legend()
     plt.grid(True, which="both", ls="-", alpha=0.3)
-    
-    # Plot material parameters (though they should be constant in Stage 1)
-    plt.subplot(2, 1, 2)
-    plt.plot(history['step'], history['E_pred'], label='E (Young\'s Modulus)', color='tab:blue')
-    plt.plot(history['step'], history['nu_pred'], label='nu (Poisson\'s Ratio)', color='tab:red')
-    plt.title('Material Parameters During Pre-training (Should Remain Constant)')
-    plt.xlabel('Training Step')
-    plt.ylabel('Parameter Values')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
+
+    # Second subplot: Material parameters with dual y-axes
+    ax_E = plt.subplot(2, 1, 2)
+    ax_nu = ax_E.twinx()
+    color_E = 'tab:blue'
+    color_nu = 'tab:red'
+    p1, = ax_E.plot(history['step'], history['E_pred'], label="E (Young's Modulus)", color=color_E)
+    p2, = ax_nu.plot(history['step'], history['nu_pred'], label="nu (Poisson's Ratio)", color=color_nu)
+    if true_params is not None:
+        E_true, nu_true = true_params
+        l1 = ax_E.axhline(y=E_true, color=color_E, linestyle='--', label='True E')
+        l2 = ax_nu.axhline(y=nu_true, color=color_nu, linestyle='--', label='True nu')
+    ax_E.set_xlabel('Training Step')
+    ax_E.set_ylabel("E (Young's Modulus) [Pa]", color=color_E)
+    ax_nu.set_ylabel("nu (Poisson's Ratio)", color=color_nu)
+    ax_E.tick_params(axis='y', labelcolor=color_E)
+    ax_nu.tick_params(axis='y', labelcolor=color_nu)
+    # Set y-ticks and limits for E and nu
+    ax_E.set_ylim(40000, 85000)
+    ax_E.set_yticks([40000, 45000, 50000, 55000, 60000, 65000, 70000, 75000, 80000, 85000])
+    ax_nu.set_ylim(0.1, 0.4)
+    ax_nu.set_yticks([0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40])
+    # Combine legends from both axes
+    lines_E, labels_E = ax_E.get_legend_handles_labels()
+    lines_nu, labels_nu = ax_nu.get_legend_handles_labels()
+    ax_nu.legend(lines_E + lines_nu, labels_E + labels_nu, loc='best')
+    if phase == "pretrain":
+        ax_E.set_title('Material Parameters During Pre-training (Should Remain Constant)')
+    else:
+        ax_E.set_title('Material Parameters During Optimization')
+    ax_E.grid(True, alpha=0.3)
+
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'pretraining_progress.png'), dpi=150)
+    fname = f'{phase}_progress.png'
+    plt.savefig(os.path.join(save_dir, fname), dpi=150)
     plt.close()
-
-
-def plot_optimization_progress(history, save_dir, true_params):
-    """Plots the optimization history."""
-    E_true, nu_true = true_params
-    
-    plt.figure(figsize=(12, 10))
-    
-    # Plot losses
-    ax1 = plt.subplot(1, 1, 1)
-    ax1.plot(history['step'], history['total_loss'], label='Total Physics Loss', color='black')
-    ax1.plot(history['step'], history['loss_pde'], label='PDE Loss', linestyle='--')
-    ax1.plot(history['step'], history['loss_bc'], label='BC Loss', linestyle='--')
-    ax1.set_yscale('log')
-    ax1.set_xlabel('Training Step')
-    ax1.set_ylabel('Physics Loss (log scale)', color='black')
-    ax1.tick_params(axis='y', labelcolor='black')
-
-    # Plot parameters
-    ax2 = ax1.twinx()
-    ax2.plot(history['step'], history['E_pred'], label='E (Young\'s Modulus)', color='tab:blue')
-    ax2.axhline(y=E_true, color='tab:blue', linestyle='--', label='True E')
-    ax2.plot(history['step'], history['nu_pred'], label='nu (Poisson\'s Ratio)', color='tab:red')
-    ax2.axhline(y=nu_true, color='tab:red', linestyle='--', label='True nu')
-    ax2.set_ylabel('Material Parameters')
-
-    # Combine legends
-    lines, labels = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines + lines2, labels + labels2, loc='best')
-
-    plt.title('Stage 2: Material Parameter Optimization')
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'optimization_progress.png'))
-    plt.close()
-
 
 if __name__ == '__main__':
     main()
