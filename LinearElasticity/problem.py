@@ -25,3 +25,6 @@ class LinearElasticity(Problem):
         def surface_map(u, x):
             return np.array([0., 0., 100.])
         return [surface_map]
+
+    def to_string(self):
+        return "linear_elasticity"

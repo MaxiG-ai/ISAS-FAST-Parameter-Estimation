@@ -7,24 +7,29 @@ from jax_fem.solver import solver
 from LinearElasticity.problem import LinearElasticity
 
 
-def run_and_solve(problem):
-    E, nu = problem.get_material_parameters()
-    mu = E / (2. * (1. + nu))
-    lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
-    sol_list = solver(problem, solver_options={'umfpack_solver': {}})
-    u_grad = problem.fes[0].sol_to_grad(sol_list[0])
-    epsilon = 0.5 * (u_grad + u_grad.transpose(0,1,3,2))
-    sigma = lmbda * jnp.trace(epsilon, axis1=2, axis2=3)[:,:,None,None] * jnp.eye(problem.dim) + 2*mu*epsilon
-    cells_JxW = problem.JxW[:,0,:]
-    sigma_average = jnp.sum(sigma * cells_JxW[:,:,None,None], axis=1) / jnp.sum(cells_JxW, axis=1)[:,None,None]
+def run_and_solve(problem, system_type):
+    match system_type:
+        case "linear_elasticity":
+            E, nu = problem.get_material_parameters()
+            mu = E / (2. * (1. + nu))
+            lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
+            sol_list = solver(problem, solver_options={'umfpack_solver': {}})
+            u_grad = problem.fes[0].sol_to_grad(sol_list[0])
+            epsilon = 0.5 * (u_grad + u_grad.transpose(0,1,3,2))
+            sigma = lmbda * jnp.trace(epsilon, axis1=2, axis2=3)[:,:,None,None] * jnp.eye(problem.dim) + 2*mu*epsilon
+            cells_JxW = problem.JxW[:,0,:]
+            sigma_average = jnp.sum(sigma * cells_JxW[:,:,None,None], axis=1) / jnp.sum(cells_JxW, axis=1)[:,None,None]
 
-    # Von Mises stress
-    s_dev = (sigma_average - 1/problem.dim * jnp.trace(sigma_average, axis1=1, axis2=2)[:,None,None]
-                                        * jnp.eye(problem.dim)[None,:,:])
-    vm_stress = jnp.sqrt(3./2. * jnp.sum(s_dev*s_dev, axis=(1,2)))
+            # Von Mises stress
+            s_dev = (sigma_average - 1/problem.dim * jnp.trace(sigma_average, axis1=1, axis2=2)[:,None,None]
+                                                * jnp.eye(problem.dim)[None,:,:])
+            vm_stress = jnp.sqrt(3./2. * jnp.sum(s_dev*s_dev, axis=(1,2)))
 
-    u = sol_list[0].flatten()
-    return u[::5], vm_stress[::100], sigma, epsilon
+            u = sol_list[0].flatten()
+            return u[::5], vm_stress[::100], sigma, epsilon
+        
+        case _:
+            return None
 
 def get_problem(system_type):
     """
