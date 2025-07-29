@@ -19,7 +19,7 @@ import logging
 logger.setLevel(logging.DEBUG)
 
 # Material properties. Example inital values
-def _init(E=10e3, nu=0.0):
+def _init(E=40e3, nu=0.1):
     return E, nu
 
 def _init_problem(E=70e3, nu=0.3):
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))  
     x0 = jnp.array([E, nu])
-    P0 = jnp.array([[1e10, 0], [0, 1e1]])
+    P0 = jnp.array([[1e3, 0], [0, 1e-6]])
     # Process noise covariance
     Q = jnp.array([[1e10, 0], [0, 1e1]])
 
