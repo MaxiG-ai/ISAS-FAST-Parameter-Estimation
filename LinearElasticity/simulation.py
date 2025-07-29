@@ -1,6 +1,5 @@
 import jax.numpy as np
 import os
-import scipy.sparse
 
 from jax_fem.problem import Problem
 from jax_fem.solver import solver
@@ -26,7 +25,7 @@ class LinearElasticitySimulation:
         meshio_mesh = box_mesh_gmsh(Nx=self.Nx, Ny=self.Ny, Nz=self.Nz,
                                     Lx=self.Lx, Ly=self.Ly, Lz=self.Lz,
                                     data_dir=data_dir, ele_type=self.ele_type)
-        self.mesh = Mesh(meshio_mesh.points, meshio_mesh.cells_dict[self.cell_type])
+        self.mesh = Mesh(meshio_mesh.points, hio_mesh.cells_dict[self.cell_type])
 
         # Define boundary locations
         def left(point):

@@ -4,6 +4,8 @@ import jax.numpy as jnp
 from jax_fem.generate_mesh import box_mesh_gmsh, get_meshio_cell_type, Mesh
 from jax_fem.solver import solver
 
+from LinearElasticity.problem import LinearElasticity
+
 
 def run_and_solve(problem):
     E, nu = problem.get_material_parameters()
@@ -24,6 +26,28 @@ def run_and_solve(problem):
     u = sol_list[0].flatten()
     return u[::5], vm_stress[::100], sigma, epsilon
 
+def get_problem(system_type):
+    """
+        Returns an instance of a problem to be used within a simulation.
+        @param system_type: Specifies the exact problem. "linear_elasticity" is implemented first while other system settings can be added within the case statement
+
+        returns: instance of the problem
+    """
+    match system_type:
+        case "linear_elasticity":
+            mesh, ele_type, dirichlet_bc_info, location_fns = _mesh_config()
+
+            # Create an instance of the problem.
+            problem = LinearElasticity(mesh,
+                                    vec=3,
+                                    dim=3,
+                                    ele_type=ele_type,
+                                    dirichlet_bc_info=dirichlet_bc_info,
+                                    location_fns=location_fns)
+        case _:
+            problem = None
+        
+    return problem
 
 def _mesh_config():# Specify mesh-related information (second-order tetrahedron element).
     ele_type = 'TET10'
