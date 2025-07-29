@@ -2,6 +2,8 @@ import jax.numpy as jnp
 import optimistix as optx
 import jax
 
+# from nls.stress import calculate_stress
+
 def lm_solver(init_params, epsilon, sigma_mes):
     """
     This function sets up and runs the Levenberg-Marquardt optimization solver using Optimistix.
@@ -15,14 +17,15 @@ def lm_solver(init_params, epsilon, sigma_mes):
     solver = optx.LevenbergMarquardt(
         rtol = 1e-8,
         atol = 1e-8,
-        norm = optx.two_norm
+        norm = optx.two_norm,
+        verbose=frozenset(["loss", "step"])
     )
 
     # Perform optimization
     sol = optx.least_squares(residuals, solver, init_params, args=(epsilon, sigma_mes), max_steps=512)
 
     pred_params = sol.value
-
+    print(pred_params)
     return pred_params
 
 # 1. Calculate stress from strain and estimated parameters
@@ -47,6 +50,7 @@ def calculate_stress(epsilon, params):
 
     # Calculate stress tensor from strain tensor
     sigma_pred = lmbda * jnp.trace(epsilon) * jnp.eye(3) + 2 * mu * epsilon
+    print(sigma_pred)
     return sigma_pred
 
 def residuals(params, epsilon__sigma_mes):
