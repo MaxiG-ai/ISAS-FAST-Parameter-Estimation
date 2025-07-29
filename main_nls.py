@@ -1,13 +1,13 @@
 # Import some useful modules.
-import jax.numpy as np
+import jax.numpy as jnp
 import jax
 
-import numpy as onp
 import os
 import matplotlib.pyplot as plt
 
 from LinearElasticity.problem import LinearElasticity
 from nls.nls_optx import lm_solver
+from nls.stress import calculate_stress
 
 from util import run_and_solve, _mesh_config
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     E, nu = _init()
     mu = E / (2. * (1. + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))  
-    init_params = np.array([E, nu])
+    init_params = jnp.array([E, nu])
     
 
     estimated_states = [_init()]
@@ -52,8 +52,10 @@ if __name__ == "__main__":
     problem.set_material_parameters(problem_E, problem_nu)
     _, _, sigma, epsilon = run_and_solve(problem=problem)
     for _ in range(5):
+        print(init_params)
+        sigma_pred = calculate_stress(init_params)
         # Run NLS
-        pred_params = lm_solver(init_params, epsilon, sigma)
+        pred_params = lm_solver(init_params, epsilon, sigma, sigma_pred)
         estimated_states.append(pred_params)
         i += 1
         # Set predicted materialparameters as initial guess for next iteration
@@ -83,4 +85,4 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("NLS Estimates of Material Parameters")
-    plt.savefig("plots/NLS_estimate3.pdf")
+    plt.savefig("plots/resultsNLS/NLS_estimate_optx.pdf")
