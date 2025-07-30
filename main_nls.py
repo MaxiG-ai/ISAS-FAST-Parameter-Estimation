@@ -6,8 +6,7 @@ import os
 import matplotlib.pyplot as plt
 
 from LinearElasticity.problem import LinearElasticity
-from nls.nls_optx import lm_solver
-from nls.stress import calculate_stress
+from nls.nls import lm_solver
 
 from util import run_and_solve, _mesh_config
 
@@ -20,7 +19,7 @@ import logging
 logger.setLevel(logging.DEBUG)
 
 # Material properties. Example inital values
-def _init(E=50e3, nu=0.1):
+def _init(E=10e3, nu=0.0):
     return E, nu
 
 def _init_problem(E=70e3, nu=0.3):
@@ -52,10 +51,9 @@ if __name__ == "__main__":
     problem.set_material_parameters(problem_E, problem_nu)
     _, _, sigma, epsilon = run_and_solve(problem=problem)
     for _ in range(5):
-        print(init_params)
-        sigma_pred = calculate_stress(init_params)
+        # sigma_pred, epsilon_pred = calculate_stress(init_params)
         # Run NLS
-        pred_params = lm_solver(init_params, epsilon, sigma, sigma_pred)
+        pred_params = lm_solver(init_params, epsilon, sigma)
         estimated_states.append(pred_params)
         i += 1
         # Set predicted materialparameters as initial guess for next iteration
@@ -85,4 +83,4 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("NLS Estimates of Material Parameters")
-    plt.savefig("plots/resultsNLS/NLS_estimate_optx.pdf")
+    plt.savefig("plots/resultsNLS/NLS_estimate4.pdf")
