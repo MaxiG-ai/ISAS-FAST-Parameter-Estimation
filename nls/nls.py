@@ -1,56 +1,80 @@
-import numpy as np
+import jax.numpy as jnp
+import optimistix as optx
+import jax
 
-def levenberg_marquardt(f, jacobian, x0, y, t, max_iter=100, tol=1e-6, lambda_init=0.01):
+
+# 1. Calculate stress from strain and estimated parameters
+# 2. Generate ground truth from Jax-FEM
+# 3. Calculate residuals
+# 4. Use Levenberg-Marquardt to optimize parameters
+
+def lm_solver(init_params, epsilon, sigma_mes):
     """
-    Levenberg-Marquardt algorithm for non-linear least squares.
-
-    Parameters:
-        f : callable
-            Model function f(x, t), where x is parameter vector, t is input data.
-        jacobian : callable
-            Jacobian function J(x, t), returns Jacobian matrix of f at x.
-        x0 : ndarray
-            Initial guess for parameters.
-        y : ndarray
-            Observed data.
-        t : ndarray
-            Independent variable.
-        max_iter : int
-            Maximum number of iterations.
-        tol : float
-            Tolerance for convergence.
-        lambda_init : float
-            Initial damping parameter.
-
+    This function sets up and runs the Levenberg-Marquardt optimization solver using Optimistix.
+    It optimizes the parameters of a linear elasticity problem based on the residuals between
+    predicted and measured stress tensors.
     Returns:
-        x : ndarray
-            Estimated parameters.
-        history : list
-            History of parameter vectors.
+        pred_params: The optimized parameters [E, nu] where E is Young's modulus and nu is Poisson's ratio.
     """
-    x = x0.copy()
-    λ = lambda_init
-    history = [x.copy()]
+    
+    # Define the solver using Optimistix's Levenberg-Marquardt
+    solver = optx.LevenbergMarquardt(
+        rtol = 1e-8,
+        atol = 1e-8,
+        norm = optx.max_norm,
+        verbose=frozenset(["loss", "step", "accepted", "step_size", "y"])
+    )
 
-    for iteration in range(max_iter):
-        r = y - f(x, t)  # residuals
-        J = jacobian(x, t)
-        H = J.T @ J  # Approximate Hessian
-        g = J.T @ r  # Gradient
-        delta = np.linalg.solve(H + λ * np.eye(len(x)), g)
+    # Perform optimization
+    sol = optx.least_squares(residuals, solver, init_params, args=(epsilon, sigma_mes))
 
-        x_new = x + delta
-        r_new = y - f(x_new, t)
+    pred_params = sol.value
+    return pred_params
 
-        if np.linalg.norm(r_new) < np.linalg.norm(r):  # Improvement
-            x = x_new
-            λ *= 0.7
-        else:  # No improvement
-            λ *= 2.0
 
-        history.append(x.copy())
+def residuals(params, epsilon__sigma_mes):
+    """ Calculate residuals between predicted and measured stress.
+    params: [E, nu]
+    sigma_pred: predicted stress tensor
+    sigma_mes: measured stress tensor
+    Returns: residuals
+    """
+    # Unpack strain and measured stress
+    epsilon, sigma_mes = epsilon__sigma_mes
 
-        if np.linalg.norm(delta) < tol:
-            break
+    # Calculate residuals
+    sigma_pred = stress_function(epsilon, params)
+    res_sigma = sigma_pred - sigma_mes
 
-    return x, history
+    return res_sigma
+
+def stress_function(epsilon, params):
+    """
+    Compute stress independently for each 3x3 strain matrix.
+    epsilon: strain tensor, shape (N, M, 3, 3)
+    params: [E, nu]
+    Returns: stress tensor, shape (N, M, 3, 3)
+    """
+
+    # Unpack parameters
+    E, nu = params
+    mu = E / (2 * (1 + nu))
+    lmbda = (E * nu) / ((1 + nu) * (1 - 2 * nu))
+
+    # Flatten to shape (N*M, 3, 3)
+    epsilon_flat = epsilon.reshape(-1, 3, 3)
+
+    # Compute trace for each 3x3 matrix
+    trace = jnp.trace(epsilon_flat, axis1=1, axis2=2)  # shape (N*M,)
+    trace_expanded = trace[:, None, None]              # shape (N*M, 1, 1)
+
+    # Identity matrix (3x3) broadcasted to each sample
+    identity = jnp.eye(3)[None, :, :]                  # shape (1, 3, 3)
+
+    # Compute stress: σ = λ tr(ε) I + 2μ ε
+    sigma_flat = lmbda * trace_expanded * identity + 2 * mu * epsilon_flat  # (N*M, 3, 3)
+
+    # Reshape back to (N, M, 3, 3)
+    sigma_pred = sigma_flat.reshape(epsilon.shape)
+
+    return sigma_pred

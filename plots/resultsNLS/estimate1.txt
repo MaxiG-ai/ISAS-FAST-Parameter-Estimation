@@ -1,0 +1,23 @@
+Step: 0, Accepted steps: 0, Steps since acceptance: 0, Loss on this step: 1289588986.2455192, Loss on the last accepted step: 0.0, Step size: 1.0, y: [50000.      0.1], y on the last accepted step: [50000.      0.1]
+Step: 1, Accepted steps: 1, Steps since acceptance: 0, Loss on this step: 1079086328058.6226, Loss on the last accepted step: 1289588986.2455192, Step size: 0.25, y: [71432.50319     0.49006], y on the last accepted step: [50000.      0.1]
+Step: 2, Accepted steps: 1, Steps since acceptance: 1, Loss on this step: 1647284286.8806455, Loss on the last accepted step: 1289588986.2455192, Step size: 0.0625, y: [61219.26194     0.39841], y on the last accepted step: [50000.      0.1]
+Step: 3, Accepted steps: 1, Steps since acceptance: 2, Loss on this step: 328837183.19706136, Loss on the last accepted step: 1289588986.2455192, Step size: 0.21875, y: [53860.56129     0.33238], y on the last accepted step: [53860.56129     0.33238]
+Step: 4, Accepted steps: 2, Steps since acceptance: 0, Loss on this step: 138921266.11701855, Loss on the last accepted step: 328837183.19706136, Step size: 0.765625, y: [59530.96926     0.3242 ], y on the last accepted step: [59530.96926     0.3242 ]
+Step: 5, Accepted steps: 3, Steps since acceptance: 0, Loss on this step: 16056767.376045516, Loss on the last accepted step: 138921266.11701855, Step size: 2.6796875, y: [66472.58497     0.3075 ], y on the last accepted step: [66472.58497     0.3075 ]
+Step: 6, Accepted steps: 4, Steps since acceptance: 0, Loss on this step: 246999.3688959955, Loss on the last accepted step: 16056767.376045516, Step size: 9.37890625, y: [69564.26107     0.30082], y on the last accepted step: [69564.26107     0.30082]
+Step: 7, Accepted steps: 5, Steps since acceptance: 0, Loss on this step: 376.6629571414136, Loss on the last accepted step: 246999.3688959955, Step size: 32.826171875, y: [69982.9871      0.30003], y on the last accepted step: [69982.9871      0.30003]
+Step: 8, Accepted steps: 6, Steps since acceptance: 0, Loss on this step: 0.050303246198652014, Loss on the last accepted step: 376.6629571414136, Step size: 114.8916015625, y: [69999.80335     0.3    ], y on the last accepted step: [69999.80335     0.3    ]
+Step: 9, Accepted steps: 7, Steps since acceptance: 0, Loss on this step: 5.592880544384971e-07, Loss on the last accepted step: 0.050303246198652014, Step size: 402.12060546875, y: [69999.99934     0.3    ], y on the last accepted step: [69999.99934     0.3    ]
+Step: 10, Accepted steps: 8, Steps since acceptance: 0, Loss on this step: 5.101129719974683e-13, Loss on the last accepted step: 5.592880544384971e-07, Step size: 1407.422119140625, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+Step: 11, Accepted steps: 9, Steps since acceptance: 0, Loss on this step: 3.7083117771974275e-20, Loss on the last accepted step: 5.101129719974683e-13, Step size: 4925.9774169921875, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+Step: 12, Accepted steps: 10, Steps since acceptance: 0, Loss on this step: 0.0, Loss on the last accepted step: 3.7083117771974275e-20, Step size: 17240.920959472656, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+
+ITER 1
+Step: 0, Accepted steps: 0, Steps since acceptance: 0, Loss on this step: 0.0, Loss on the last accepted step: 0.0, Step size: 1.0, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+ITER 2
+Step: 0, Accepted steps: 0, Steps since acceptance: 0, Loss on this step: 0.0, Loss on the last accepted step: 0.0, Step size: 1.0, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+ITER 3
+Step: 0, Accepted steps: 0, Steps since acceptance: 0, Loss on this step: 0.0, Loss on the last accepted step: 0.0, Step size: 1.0, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+ITER 4
+Step: 0, Accepted steps: 0, Steps since acceptance: 0, Loss on this step: 0.0, Loss on the last accepted step: 0.0, Step size: 1.0, y: [70000.      0.3], y on the last accepted step: [70000.      0.3]
+ITER 5

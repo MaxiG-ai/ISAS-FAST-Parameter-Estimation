@@ -87,7 +87,7 @@ if __name__ == "__main__":
     ax[1].set_ylabel("Young's Modulus [Pa]")
 
     fig.suptitle("EKF Estimates of Material Parameters")
-    plt.savefig("plots/resultsEKF/EKF_estimate9.pdf")
+    plt.savefig("plots/resultsEKF/EKF_estimate10.pdf")
 
 
 # Calculate standard deviation and create uncertainty bands
@@ -119,4 +119,4 @@ ax[1].set_xlabel("Iteration")
 ax[1].set_ylabel("Young's Modulus [Pa]")
 
 fig.suptitle("EKF Estimates with Prediction Uncertainty ")
-plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty9.pdf")
+plt.savefig("plots/resultsEKF/EKF_estimate_uncertainty10.pdf")
