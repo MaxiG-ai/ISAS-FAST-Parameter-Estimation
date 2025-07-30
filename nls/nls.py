@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 import optimistix as optx
-import jax
 
 
 # 1. Calculate stress from strain and estimated parameters
@@ -71,7 +70,7 @@ def stress_function(epsilon, params):
     # Identity matrix (3x3) broadcasted to each sample
     identity = jnp.eye(3)[None, :, :]                  # shape (1, 3, 3)
 
-    # Compute stress: σ = λ tr(ε) I + 2μ ε
+    # Compute stress from constitutive equation: σ = λ tr(ε) I + 2μ ε
     sigma_flat = lmbda * trace_expanded * identity + 2 * mu * epsilon_flat  # (N*M, 3, 3)
 
     # Reshape back to (N, M, 3, 3)

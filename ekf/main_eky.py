@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from LinearElasticity.LinearElasticityEKF import LinearElasticityEKF
+from LinearElasticityEKF import LinearElasticityEKF
 
 from util import run_and_solve, get_problem
 

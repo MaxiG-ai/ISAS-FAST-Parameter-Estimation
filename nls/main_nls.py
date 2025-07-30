@@ -1,8 +1,5 @@
 # Import some useful modules.
 import jax.numpy as jnp
-import jax
-
-import os
 import matplotlib.pyplot as plt
 
 from LinearElasticity.problem import LinearElasticity
@@ -55,9 +52,6 @@ if __name__ == "__main__":
     estimated_nu = [a[1] for a in estimated_states]
     measured_E = [_init_problem()[0] for _ in estimated_E]
     measured_nu = [_init_problem()[1] for _ in estimated_nu]
-
-    # print(f"Estimated nu: {estimated_nu} Measured nu: {measured_nu}")
-    # print(f"Estimated E: {estimated_E} Measured E: {measured_E}")
 
     fig, ax = plt.subplots(nrows=1, ncols=2, tight_layout=True, figsize=(10, 5))
 
