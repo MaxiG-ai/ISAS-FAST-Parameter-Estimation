@@ -37,19 +37,18 @@ def get_problem(system_type):
 
         returns: instance of the problem
     """
-    match system_type:
-        case "linear_elasticity":
-            mesh, ele_type, dirichlet_bc_info, location_fns = _mesh_config()
+    if system_type == "linear_elasticity":
+        mesh, ele_type, dirichlet_bc_info, location_fns = _mesh_config()
 
-            # Create an instance of the problem.
-            problem = LinearElasticity(mesh,
-                                    vec=3,
-                                    dim=3,
-                                    ele_type=ele_type,
-                                    dirichlet_bc_info=dirichlet_bc_info,
-                                    location_fns=location_fns)
-        case _:
-            problem = None
+        # Create an instance of the problem.
+        problem = LinearElasticity(mesh,
+                                vec=3,
+                                dim=3,
+                                ele_type=ele_type,
+                                dirichlet_bc_info=dirichlet_bc_info,
+                                location_fns=location_fns)
+    else:    
+        problem = None
         
     return problem
 
