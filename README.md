@@ -29,12 +29,12 @@ In `LinearElasticity/problem.py`, we define a problem setup consistent with the 
 - **Core implementation**: `ekf/ekf.py`
 - **Linear elasticity-specific implementation**: `ekf/LinearElasticityEKF.py`
 - **Tests**: `ekf/tests.py` — validates functionality with a toy example.
-- **Simulation run**: `ekf/main_ekf.py` — performs material parameter estimation using the `LinearElasticityEKF`.
+- **Simulation run**: `main_ekf.py` — performs material parameter estimation using the `LinearElasticityEKF`.
 
 ### NLS (Nonlinear Least Squares - Levenberg-Marquardt)
-- **Implementation**: `nls/nls_optx.py`
-- **Tests**: `nls/tests_optx.py`
-- **Simulation run**: `nls/main_nls.py` — estimates material parameters using the `nls_optx` implementation.
+- **Implementation**: `nls/nls.py`
+- **Tests**: `nls/tests.py` — generates set of data, to use for the application of one iteration inside `nls/nls.py`
+- **Simulation run**: `main_nls.py` — estimates material parameters using the `nls` implementation.
 
 ### PINNs (Physics-Informed Neural Networks)
 - **Model**: `pinn/model.py`

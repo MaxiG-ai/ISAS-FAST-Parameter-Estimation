@@ -39,7 +39,6 @@ if __name__ == "__main__":
     problem.set_material_parameters(problem_E, problem_nu)
     _, _, sigma, epsilon = run_and_solve(problem=problem, system_type=problem.to_string())
     for _ in range(5):
-        # sigma_pred, epsilon_pred = calculate_stress(init_params)
         # Run NLS
         pred_params = lm_solver(init_params, epsilon, sigma)
         estimated_states.append(pred_params)
