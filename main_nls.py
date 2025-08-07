@@ -21,7 +21,7 @@ def _init_problem(E=70e3, nu=0.3):
     return E, nu
 
 if __name__ == "__main__":
-    problem = get_problem(system_type="linear-elasticity")
+    problem = get_problem(system_type="linear_elasticity")
 
     E, nu = _init()
     mu = E / (2. * (1. + nu))
